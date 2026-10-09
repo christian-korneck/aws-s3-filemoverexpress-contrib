@@ -1,5 +1,18 @@
 name: release
 
+# Fork variant of the upstream release workflow.
+#
+# Upstream (awslabs/filemoverexpress) signs and notarizes the macOS and Windows
+# artifacts through Amazon-internal services (CD Signer, AWS Code Signer) that are
+# gated behind the `signing` environment and the *_SIGNING_ENABLED repository
+# variables. Those services are not reachable from a fork, and the upstream
+# create-release job hard-fails without the signed macOS .dmg files they produce.
+#
+# This variant has no special needs: it builds every platform unsigned, packages
+# the macOS .app into a .dmg on the build runner itself, and publishes a GitHub
+# Release using only the automatic GITHUB_TOKEN. No secrets, variables, or
+# environments are required. The published asset names are identical to upstream.
+
 on:
   push:
     tags: ['v*']
@@ -30,6 +43,15 @@ jobs:
       - uses: ./.github/actions/setup-environment
       - uses: ./.github/actions/generate-bindings
 
+  # ---------------------------------------------------------------------------
+  # Desktop installers (macOS .dmg, Windows NSIS .exe), unsigned
+  #
+  # `task wails:package` (via the generate-installer action) produces an ad-hoc
+  # signed .app on macOS and the NSIS installer .exe on Windows. The .dmg is built
+  # here from the unsigned .app, mirroring the "Build .dmg from signed .app" step
+  # of the upstream sign-macos.yml so the asset layout (bundle renamed to the
+  # human-facing display name, /Applications symlink, UDZO image) stays the same.
+  # ---------------------------------------------------------------------------
   generate-installer:
     needs: [generate-protobuf, generate-bindings]
     strategy:
@@ -60,11 +82,43 @@ jobs:
           architecture: ${{ matrix.architecture }}
           build-version: ${{ inputs.version || github.ref_name }}
 
+      - name: Build .dmg from unsigned .app (macOS)
+        if: matrix.platform == 'mac'
+        shell: bash
+        env:
+          # APP_NAME must match src/wails/Taskfile.yml; DISPLAY_NAME is the bundle
+          # name shown in Finder; DMG_BASENAME controls the published asset filename.
+          APP_NAME: FileMoverExpressUI
+          DISPLAY_NAME: File Mover Express
+          DMG_BASENAME: filemoverexpress-macos
+          ARCH: ${{ matrix.architecture }}
+        run: |
+          set -euo pipefail
+          DMG_NAME="${DMG_BASENAME}-${ARCH}"
+          if [ ! -d "dist/${APP_NAME}.app" ]; then
+            echo "ERROR: dist/${APP_NAME}.app not found after packaging" >&2
+            ls -la dist >&2
+            exit 1
+          fi
+          rm -rf dist/dmg-staging "dist/${DMG_NAME}.dmg"
+          mkdir -p dist/dmg-staging
+          # ditto (not cp -R) preserves extended attributes and the ad-hoc signature.
+          ditto "dist/${APP_NAME}.app" "dist/dmg-staging/${DISPLAY_NAME}.app"
+          ln -s /Applications dist/dmg-staging/Applications
+          hdiutil create -volname "${DISPLAY_NAME}" -srcfolder dist/dmg-staging -ov -format UDZO "dist/${DMG_NAME}.dmg"
+          rm -rf dist/dmg-staging
+          echo "Built dist/${DMG_NAME}.dmg (app bundle: ${DISPLAY_NAME}.app)"
+
+      - name: Upload macOS .dmg
+        if: matrix.platform == 'mac'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dmg-mac-${{ matrix.architecture }}
+          path: dist/filemoverexpress-macos-${{ matrix.architecture }}.dmg
+          retention-days: 30
+
   # ---------------------------------------------------------------------------
-  # MCP server binary build (fme-mcp)
-  #
-  # Builds the standalone MCP server binary for all platforms. macOS and Windows
-  # binaries are fed into the signing chains below.
+  # MCP server binary build (fme-mcp), unsigned, all platforms
   # ---------------------------------------------------------------------------
   build-mcp:
     needs: [generate-protobuf]
@@ -121,18 +175,12 @@ jobs:
           retention-days: 30
 
   # ---------------------------------------------------------------------------
-  # Headless CLI daemon build (filemoverexpress)
+  # Headless CLI daemon build (filemoverexpress), Linux only
   #
-  # Builds the standalone CLI daemon binary for Linux only. Linux is not shipped
-  # as a desktop GUI (native WebKitGTK dependencies, no signing); Linux users run
-  # the headless daemon on servers, render farms, and cloud instances, and drive
-  # it from a GUI on another machine over the remote-daemon connection. The macOS
-  # and Windows desktop installers already bundle this same daemon, so it is only
-  # published standalone for Linux. The binary is pure Go (CGO_ENABLED=0) and
-  # cross-compiles cleanly, exactly like fme-mcp above. Linux artifacts are
-  # unsigned, so each leg builds straight to its final release asset name and
-  # create-release publishes it as-is (no rename/sign step). The asset names match
-  # what docs/Headless-Linux-Installation.md tells users to download.
+  # Linux is not shipped as a desktop GUI (native WebKitGTK dependencies); Linux
+  # users run the headless daemon and drive it from a GUI on another machine. The
+  # macOS and Windows desktop installers bundle this same daemon. The binary is
+  # pure Go (CGO_ENABLED=0) and builds straight to its final release asset name.
   # ---------------------------------------------------------------------------
   build-cli:
     needs: [generate-protobuf]
@@ -168,219 +216,21 @@ jobs:
           retention-days: 30
 
   # ---------------------------------------------------------------------------
-  # macOS code signing (CD Signer) + notarization (Apple notary)
-  #
-  # Gated behind the `MACOS_SIGNING_ENABLED` repository variable so releases keep
-  # working before CD Signer onboarding + the `signing` environment secrets/vars
-  # are in place. Set the variable to 'true' (and configure the secrets/vars
-  # documented in sign-macos.yml / notarize-macos.yml) to activate the chain:
-  #   build (.app) -> sign-macos (CD Signer -> signed .dmg) -> notarize-macos.
-  # ---------------------------------------------------------------------------
-  sign-macos:
-    needs: [generate-installer]
-    # Run whenever the workflow isn't cancelled (not only on full matrix success):
-    # generate-installer is a matrix, so one failing platform leg would otherwise skip
-    # this. The per-arch "download unsigned .app" step is the real guard — an arch whose
-    # build didn't produce an installer fails there, while built arches still sign.
-    if: ${{ !cancelled() && vars.MACOS_SIGNING_ENABLED == 'true' }}
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        architecture: [x64, arm64]
-    permissions:
-      id-token: write
-      contents: read
-    uses: ./.github/workflows/sign-macos.yml
-    with:
-      artifact-name: installer-mac-${{ matrix.architecture }}
-      app-name: FileMoverExpressUI
-      display-name: File Mover Express
-      # dmg-basename controls the published asset filename. The "macos" token is
-      # human-facing (these installers are downloaded by people, not OS-detecting
-      # scripts); the script-fetched MCP/CLI binaries keep Go GOOS tokens (darwin,
-      # linux) - see the rename step in create-release.
-      dmg-basename: filemoverexpress-macos
-      arch: ${{ matrix.architecture }}
-    # Pass only the secrets sign-macos.yml declares (not `secrets: inherit`, which would
-    # forward every repo/env secret to the reusable workflow).
-    secrets:
-      AWS_MACOS_SIGNING_ROLE_ARN: ${{ secrets.AWS_MACOS_SIGNING_ROLE_ARN }}
-      CD_SIGNER_BUCKET_ACCESS_ROLE: ${{ secrets.CD_SIGNER_BUCKET_ACCESS_ROLE }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-
-  notarize-macos:
-    needs: [sign-macos]
-    if: ${{ !cancelled() && vars.MACOS_SIGNING_ENABLED == 'true' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        architecture: [x64, arm64]
-    permissions:
-      contents: read
-    uses: ./.github/workflows/notarize-macos.yml
-    with:
-      signed-artifact-name: signed-installer-mac-${{ matrix.architecture }}
-      dmg-filename: filemoverexpress-macos-${{ matrix.architecture }}.dmg
-    # Pass only the secrets notarize-macos.yml declares (not `secrets: inherit`).
-    secrets:
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-
-  # ---------------------------------------------------------------------------
-  # MCP server macOS code signing (CD Signer, executables path)
-  #
-  # Signs the standalone fme-mcp binary using the same CD Signer infrastructure as
-  # the main app. Uses the executables path (bare Mach-O, not a .app bundle) with
-  # identifier com.amazon.filemoverexpress.mcp.
-  #
-  # Gated behind `MCP_SIGNING_ENABLED` (separate from MACOS_SIGNING_ENABLED) because
-  # the MCP bundle ID requires its own signing permissions in the CD Signer bindle.
-  # Set the variable to 'true' once the permissions are granted.
-  # ---------------------------------------------------------------------------
-  sign-mcp-macos:
-    needs: [build-mcp]
-    if: ${{ !cancelled() && vars.MCP_SIGNING_ENABLED == 'true' }}
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        architecture: [x64, arm64]
-    runs-on: macos-15
-    timeout-minutes: 30
-    environment: signing
-    permissions:
-      id-token: write
-      contents: read
-    env:
-      AWS_REGION: ${{ vars.CD_SIGNER_REGION }}
-      CD_SIGNER_API_BASE_URL: ${{ vars.CD_SIGNER_API_BASE_URL }}
-      SIGNING_BUCKET: ${{ vars.MACOS_SIGNING_BUCKET }}
-      BUNDLE_ID: ${{ vars.MACOS_BUNDLE_ID }}
-      BUCKET_ACCESS_ROLE: ${{ secrets.CD_SIGNER_BUCKET_ACCESS_ROLE }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      ARCH: ${{ matrix.architecture }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download unsigned fme-mcp
-        uses: actions/download-artifact@v4
-        with:
-          name: mcp-mac-${{ matrix.architecture }}
-          path: ./unsigned
-
-      - name: Set up Python for SigV4 signing
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install signing dependencies
-        run: |
-          set -euo pipefail
-          brew install gnu-tar
-          python3 -m pip install requests botocore
-
-      - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_MACOS_SIGNING_ROLE_ARN }}
-          aws-region: ${{ vars.CD_SIGNER_REGION }}
-
-      - name: Sign fme-mcp via CD Signer (executables path)
-        run: ./.github/workflows/scripts/sign-mcp-macos.sh
-
-      - name: Upload signed fme-mcp
-        uses: actions/upload-artifact@v4
-        with:
-          name: signed-mcp-mac-${{ matrix.architecture }}
-          path: signed-fme-mcp
-          retention-days: 30
-
-  # ---------------------------------------------------------------------------
-  # Windows code signing (AWS Code Signer / Wallaby, Authenticode)
-  #
-  # Gated behind the `WINDOWS_SIGNING_ENABLED` repository variable so releases keep
-  # working before the `signing` environment secret/vars are in place. Set the variable
-  # to 'true' (and configure AWS_SIGNING_ROLE_ARN + AWS_SIGNING_ACCOUNT_ID +
-  # AWS_SIGNING_REGION, documented in sign-windows.yml) to activate signing the NSIS
-  # installer .exe via the S3-bridge.
-  #
-  # architecture is the build matrix label (x64/arm64); nsis-arch is the token the
-  # NSIS installer filename uses (amd64/arm64, chosen by GOARCH in the Windows Taskfile).
-  # ---------------------------------------------------------------------------
-  sign-windows:
-    needs: [generate-installer]
-    # Same rationale as sign-macos: run whenever not cancelled so a failing non-Windows
-    # matrix leg doesn't skip this; the per-arch "download unsigned .exe" step is the guard.
-    if: ${{ !cancelled() && vars.WINDOWS_SIGNING_ENABLED == 'true' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - architecture: x64
-            nsis-arch: amd64
-          - architecture: arm64
-            nsis-arch: arm64
-    permissions:
-      id-token: write
-      contents: read
-    uses: ./.github/workflows/sign-windows.yml
-    with:
-      artifact-name: installer-win-${{ matrix.architecture }}
-      exe-filename: filemoverexpress-windows-${{ matrix.nsis-arch }}-installer.exe
-    # Pass only the secret sign-windows.yml declares (not `secrets: inherit`).
-    secrets:
-      AWS_SIGNING_ROLE_ARN: ${{ secrets.AWS_SIGNING_ROLE_ARN }}
-
-  # ---------------------------------------------------------------------------
-  # MCP server Windows code signing (Wallaby / AWS Code Signer, Authenticode)
-  #
-  # Reuses the existing sign-windows.yml reusable workflow. Signs fme-mcp.exe using the
-  # same Authenticode profile as the main installer.
-  #
-  # Gated behind `MCP_SIGNING_ENABLED` (separate from WINDOWS_SIGNING_ENABLED) because
-  # the MCP signing profile may require separate permissions. Set the variable to 'true'
-  # once the permissions are granted.
-  # ---------------------------------------------------------------------------
-  sign-mcp-windows:
-    needs: [build-mcp]
-    if: ${{ !cancelled() && vars.MCP_SIGNING_ENABLED == 'true' }}
-    permissions:
-      id-token: write
-      contents: read
-    uses: ./.github/workflows/sign-windows.yml
-    with:
-      artifact-name: mcp-win-x64
-      exe-filename: fme-mcp.exe
-    secrets:
-      AWS_SIGNING_ROLE_ARN: ${{ secrets.AWS_SIGNING_ROLE_ARN }}
-
-  # ---------------------------------------------------------------------------
   # Create GitHub Release
   #
-  # Collects all signed (or unsigned fallback) artifacts and publishes them as a
-  # GitHub Release. Runs even if some upstream jobs fail (Linux installer builds
-  # require native dependencies unavailable on CI runners; signing may be disabled).
+  # Collects the unsigned artifacts and publishes them as a GitHub Release. Runs
+  # whenever the workflow was not cancelled so that one failed build leg still
+  # surfaces as a clear "missing asset" error from the gate below rather than a
+  # silently skipped job.
   #
-  # Included assets:
-  #   - macOS desktop app (.dmg): notarized > signed > unsigned, per arch
-  #   - Windows installer (.exe): signed > unsigned, per arch
-  #   - MCP server binaries: signed where available, unsigned for Linux
-  #
-  # NOT included: Linux desktop installers (require source-code build with
-  # CGo/webkit dependencies not available on CI runners).
+  # NOT included: Linux desktop installers (require native CGo/webkit dependencies
+  # not available on CI runners).
   # ---------------------------------------------------------------------------
   create-release:
     needs:
       - generate-installer
       - build-mcp
       - build-cli
-      - notarize-macos
-      - sign-macos
-      - sign-windows
-      - sign-mcp-macos
-      - sign-mcp-windows
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
@@ -393,125 +243,61 @@ jobs:
       - name: Prepare release directory
         run: mkdir -p release-assets
 
-      # ----- macOS desktop app (prefer notarized > signed > unsigned) -----
-      - name: Download notarized macOS x64 .dmg
-        id: notarized-mac-x64
+      # Each download keeps continue-on-error so that every missing asset is
+      # reported at once by the strict gate below, instead of failing on the first.
+
+      # ----- macOS desktop app (.dmg, unsigned) -----
+      - name: Download macOS x64 .dmg
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
-          name: notarized-signed-installer-mac-x64
+          name: dmg-mac-x64
           path: release-assets
 
-      - name: Download signed macOS x64 .dmg (fallback)
-        if: steps.notarized-mac-x64.outcome != 'success'
-        id: signed-mac-x64
+      - name: Download macOS arm64 .dmg
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
-          name: signed-installer-mac-x64
+          name: dmg-mac-arm64
           path: release-assets
 
-      - name: Download notarized macOS arm64 .dmg
-        id: notarized-mac-arm64
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: notarized-signed-installer-mac-arm64
-          path: release-assets
-
-      - name: Download signed macOS arm64 .dmg (fallback)
-        if: steps.notarized-mac-arm64.outcome != 'success'
-        id: signed-mac-arm64
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: signed-installer-mac-arm64
-          path: release-assets
-
-      # ----- Windows installer (prefer signed > unsigned) -----
-      - name: Download signed Windows x64 installer
-        id: signed-win-x64
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: signed-installer-win-x64
-          path: release-assets
-
-      - name: Download unsigned Windows x64 installer (fallback)
-        if: steps.signed-win-x64.outcome != 'success'
+      # ----- Windows installer (.exe, unsigned) -----
+      - name: Download Windows x64 installer
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: installer-win-x64
           path: release-assets
 
-      - name: Download signed Windows arm64 installer
-        id: signed-win-arm64
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: signed-installer-win-arm64
-          path: release-assets
-
-      - name: Download unsigned Windows arm64 installer (fallback)
-        if: steps.signed-win-arm64.outcome != 'success'
+      - name: Download Windows arm64 installer
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: installer-win-arm64
           path: release-assets
 
-      # ----- MCP server: macOS (prefer signed > unsigned) -----
-      - name: Download signed MCP macOS x64
-        id: signed-mcp-mac-x64
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: signed-mcp-mac-x64
-          path: release-assets/mcp-mac-x64
-
-      - name: Download unsigned MCP macOS x64 (fallback)
-        if: steps.signed-mcp-mac-x64.outcome != 'success'
+      # ----- MCP server binaries (unsigned) -----
+      - name: Download MCP macOS x64
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: mcp-mac-x64
           path: release-assets/mcp-mac-x64
 
-      - name: Download signed MCP macOS arm64
-        id: signed-mcp-mac-arm64
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: signed-mcp-mac-arm64
-          path: release-assets/mcp-mac-arm64
-
-      - name: Download unsigned MCP macOS arm64 (fallback)
-        if: steps.signed-mcp-mac-arm64.outcome != 'success'
+      - name: Download MCP macOS arm64
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: mcp-mac-arm64
           path: release-assets/mcp-mac-arm64
 
-      # ----- MCP server: Windows (prefer signed > unsigned) -----
-      - name: Download signed MCP Windows x64
-        id: signed-mcp-win-x64
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: signed-mcp-win-x64
-          path: release-assets/mcp-win-x64
-
-      - name: Download unsigned MCP Windows x64 (fallback)
-        if: steps.signed-mcp-win-x64.outcome != 'success'
+      - name: Download MCP Windows x64
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: mcp-win-x64
           path: release-assets/mcp-win-x64
 
-      # ----- MCP server: Linux (unsigned, no signing needed) -----
       - name: Download MCP Linux x64
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -526,9 +312,8 @@ jobs:
           name: mcp-linux-arm64
           path: release-assets/mcp-linux-arm64
 
-      # ----- Headless CLI daemon: Linux (unsigned, published as-is) -----
-      # These artifacts are already named filemoverexpress-linux-<arch> by build-cli,
-      # so they are downloaded straight into release-assets with no rename step.
+      # ----- Headless CLI daemon: Linux -----
+      # Already named filemoverexpress-linux-<arch> by build-cli; no rename needed.
       - name: Download CLI daemon Linux amd64
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -550,13 +335,8 @@ jobs:
           rename_mcp() {
             local dir="$1" platform="$2" arch="$3" ext="${4:-}"
             local src="release-assets/${dir}/fme-mcp${ext}"
-            # The signed macOS artifact carries the binary as a file named
-            # "signed-fme-mcp" (the upload path in sign-mcp-macos), so match that name
-            # too - otherwise the signed macOS MCP binary is silently dropped from the
-            # release. Also handle it being nested in a subdirectory.
             if [ ! -f "$src" ]; then
-              src=$(find "release-assets/${dir}" -type f \
-                \( -name "fme-mcp${ext}" -o -name "signed-fme-mcp${ext}" \) 2>/dev/null | head -n1)
+              src=$(find "release-assets/${dir}" -type f -name "fme-mcp${ext}" 2>/dev/null | head -n1)
             fi
             if [ -f "$src" ]; then
               mv "$src" "release-assets/fme-mcp-${platform}-${arch}${ext}"
@@ -564,11 +344,10 @@ jobs:
             fi
           }
           # The macOS platform token is intentionally "darwin", not "macos": it matches
-          # Go's GOOS value and the output of `uname` on macOS ("Darwin"), which is the
-          # conventional token for CLI/server binaries and lets OS-detecting install
-          # scripts resolve the right asset. The release-body MCP table uses the same
-          # token. (The end-user-facing GUI .app/.dmg uses "File Mover Express" /
-          # filemoverexpress and is a separate concern.)
+          # Go's GOOS value and the output of `uname` on macOS, which is the conventional
+          # token for CLI/server binaries and lets OS-detecting install scripts resolve
+          # the right asset. (The end-user-facing .dmg uses "macos" and is a separate
+          # concern.)
           rename_mcp "mcp-mac-x64"     "darwin"  "amd64"
           rename_mcp "mcp-mac-arm64"   "darwin"  "arm64"
           rename_mcp "mcp-win-x64"     "windows" "amd64" ".exe"
@@ -580,12 +359,7 @@ jobs:
       # ----- List final assets -----
       - name: Verify all expected release assets are present
         # Hard gate: fail the entire run if ANY expected binary is missing, instead
-        # of publishing an incomplete release that looks green. The per-artifact
-        # download steps above keep continue-on-error because of the fallback
-        # chains (notarized > signed > unsigned); this step is the single strict
-        # check after all fallbacks have had their chance. A wrong filename counts
-        # as missing - that is exactly how the macOS MCP binary silently vanished
-        # from releases before (see the sign-mcp-macos filename mismatch fix).
+        # of publishing an incomplete release that looks green.
         run: |
           set -euo pipefail
           echo "=== Release assets ==="
@@ -641,7 +415,12 @@ jobs:
             storage and Amazon S3 - a Go transfer daemon plus a desktop GUI, a CLI, and an
             MCP server. What changed in this release is listed under **What's Changed** below.
 
-            For a full feature overview, see the [README](https://github.com/awslabs/filemoverexpress#readme).
+            For a full feature overview, see the [README](${{ github.server_url }}/${{ github.repository }}#readme).
+
+            > **Unsigned builds.** The binaries in this release are not code-signed or
+            > notarized. macOS: control-click the app and choose *Open* on first launch
+            > (or run `xattr -d com.apple.quarantine` on the `.app`). Windows: choose
+            > *More info* then *Run anyway* in the SmartScreen prompt.
 
             ## Downloads
 
