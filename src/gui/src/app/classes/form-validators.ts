@@ -130,9 +130,47 @@ export function isIntegerValidator(control: AbstractControl): ValidationErrors |
     return null;
 }
 
+/**
+ * Validates an S3 endpoint URL: a full http:// or https:// URL with a host. Emptiness is left to
+ * Validators.required so the field can stay optional for Amazon S3. Surrounding whitespace and
+ * unreplaced template placeholders such as {account_id} are rejected.
+ */
+export function endpointUrlValidator(control: AbstractControl): ValidationErrors | null {
+    const value = (control.value ?? '').toString();
+    if (!value) {
+        return null;
+    }
+    if (value !== value.trim() || /[{}]/.test(value)) {
+        return {invalidEndpoint: true};
+    }
+    try {
+        const url = new URL(value);
+        if ((url.protocol === 'http:' || url.protocol === 'https:') && url.hostname) {
+            return null;
+        }
+    } catch {
+        // fall through to the error below
+    }
+    return {invalidEndpoint: true};
+}
+
 export function bucketValidator(control: AbstractControl): ValidationErrors | null {
     const bucketString = control.value;
     if (!control.value || control.value.length == 0) {
+        return null;
+    }
+    const provider = control.parent?.get('provider')?.value;
+    if (provider && provider !== 'aws') {
+        // S3-compatible stores have their own naming rules; only reject obvious mistakes.
+        if (bucketString.startsWith('s3://')) {
+            return {
+                invalidBucket: true,
+                bucketURI: true,
+            };
+        }
+        if (/\s/.test(bucketString)) {
+            return {invalidBucket: true};
+        }
         return null;
     }
     if (control.parent?.get('accelerated')?.value && bucketString.includes('.')) {

@@ -93,12 +93,9 @@ func validateDiscoveryDocument(doc *DiscoveryDocument, issuerURL string) error {
 	return nil
 }
 
-// buildHTTPClient creates an HTTP client, optionally configured with a custom CA bundle.
-func buildHTTPClient(customCABundle string) (*http.Client, error) {
-	if customCABundle == "" {
-		return &http.Client{}, nil
-	}
-
+// LoadCABundlePool returns the system certificate pool with the PEM certificates from the given file
+// appended. It is shared by the OIDC discovery client and the S3 endpoint client.
+func LoadCABundlePool(customCABundle string) (*x509.CertPool, error) {
 	pemData, err := os.ReadFile(customCABundle)
 	if err != nil {
 		return nil, fmt.Errorf("read custom CA bundle %s: %w", customCABundle, err)
@@ -111,6 +108,20 @@ func buildHTTPClient(customCABundle string) (*http.Client, error) {
 
 	if !pool.AppendCertsFromPEM(pemData) {
 		return nil, fmt.Errorf("custom CA bundle %s contains no valid PEM certificates", customCABundle)
+	}
+
+	return pool, nil
+}
+
+// buildHTTPClient creates an HTTP client, optionally configured with a custom CA bundle.
+func buildHTTPClient(customCABundle string) (*http.Client, error) {
+	if customCABundle == "" {
+		return &http.Client{}, nil
+	}
+
+	pool, err := LoadCABundlePool(customCABundle)
+	if err != nil {
+		return nil, err
 	}
 
 	transport := &http.Transport{

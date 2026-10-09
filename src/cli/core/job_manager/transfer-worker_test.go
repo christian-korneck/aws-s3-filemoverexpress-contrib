@@ -2,7 +2,6 @@ package job_manager
 
 import (
 	"os"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -181,9 +180,9 @@ func TestJobManager_DoSingleTransfer(t *testing.T) {
 		t.Errorf("TestTransferTask(): Error creating temp file: %v", createErr)
 	}
 	jm := GetInstance()
-	endpoint := ""
-	key := strings.Join([]string{s3m.AwsProfile, s3m.Bucket, s3m.Region, endpoint}, "-")
-	jm.s3ManagerCache[key] = s3m
+	for _, job := range []*jobmanagertypes.Job{job1, job2, job3, InvalidStorageClassJob} {
+		jm.s3ManagerCache[job.TransferProfile().ConnectionKey()] = s3m
+	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

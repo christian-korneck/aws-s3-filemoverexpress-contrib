@@ -20,5 +20,6 @@ func (*FileMoverServer) GetConfiguration(
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New(strConfigurationDisabled))
 	}
 
-	return connect.NewResponse(cfg.ToGRPCProtobuf()), nil
+	// Stored secrets never leave the daemon; SetConfiguration restores them when the placeholder comes back.
+	return connect.NewResponse(cfg.Redacted().ToGRPCProtobuf()), nil
 }

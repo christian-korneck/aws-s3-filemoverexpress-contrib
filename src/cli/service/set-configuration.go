@@ -32,6 +32,13 @@ func (*FileMoverServer) SetConfiguration(
 		}), connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
+	if err = restoreRedactedSecrets(&newConfig, cfg.Protocols.S3.TransferProfiles); err != nil {
+		return connect.NewResponse(&fmev1.SetConfigurationResponse{
+			Success: false,
+			Message: err.Error(),
+		}), connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	err = config.SaveConfig(&newConfig)
 	if err != nil {
 		return connect.NewResponse(&fmev1.SetConfigurationResponse{
@@ -44,4 +51,16 @@ func (*FileMoverServer) SetConfiguration(
 		Success: true,
 		Message: strSuccessFullyUpdatedConfig,
 	}), nil
+}
+
+// restoreRedactedSecrets puts the stored secrets back into every profile that the client returned with the
+// redaction placeholder, because GetConfiguration never sends them.
+func restoreRedactedSecrets(newConfig *configtypes.FmeConfig, stored map[string]configtypes.TransferProfile) error {
+	for name, transferProfile := range newConfig.Protocols.S3.TransferProfiles {
+		if err := transferProfile.RestoreRedactedSecrets(stored); err != nil {
+			return err
+		}
+		newConfig.Protocols.S3.TransferProfiles[name] = transferProfile
+	}
+	return nil
 }

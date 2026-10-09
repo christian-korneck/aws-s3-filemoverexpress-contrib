@@ -21,6 +21,7 @@ import { provideMockStore } from '@ngrx/store/testing';
 import { initialTestState } from '@state/test.state';
 import { MatAutocompleteModule } from '@angular/material/autocomplete';
 import { FmeClientService } from '@services/fme-client/fme-client.service';
+import { TransferProfile } from '@app/classes/config';
 
 describe('SetupWizardModalComponent', () => {
     let component: SetupWizardModalComponent;
@@ -131,6 +132,69 @@ describe('SetupWizardModalComponent', () => {
             const newForm = component.transferProfileForm;
             component.updateTransferProfileForm(newForm);
             expect(component.transferProfileForm).toBe(newForm);
+        });
+    });
+
+    describe('processTransferProfiles', () => {
+        function profile(overrides: Partial<TransferProfile>): TransferProfile {
+            return TransferProfile.fromJson({
+                name: 'p',
+                bucket: 'media',
+                region: 'us-east-1',
+                profile: 'default',
+                accelerated: false,
+                fileOrder: [],
+                enableMetadataFilter: true,
+                storageClass: 'standard',
+                paths: {local: '', remote: ''},
+                chunkSize: 25,
+                threads: 10,
+                maxAge: '',
+                filter: '',
+                checksums: {enabled: false, algorithm: 'none'},
+                autoTuning: true,
+                endpoint: '',
+                ...overrides,
+            });
+        }
+
+        beforeEach(() => {
+            component.regions = ['us-east-1', 'eu-west-1'];
+            component.initialData = {
+                checkSetup: true,
+                transferProfiles: {
+                    r2: profile({name: 'r2', provider: 'cloudflare-r2', region: 'auto', authMethod: 'static-keys'}),
+                    hetzner: profile({name: 'hetzner', provider: 'hetzner', region: 'fsn1', authMethod: 'static-keys'}),
+                    b2: profile({name: 'b2', provider: 'backblaze-b2', region: 'us-west-004', authMethod: 'static-keys'}),
+                    aws: profile({name: 'aws', region: 'auto'}),
+                },
+            };
+            component.processTransferProfiles();
+        });
+
+        it('accepts the region names of S3-compatible providers', () => {
+            for (const name of [
+                'r2',
+                'hetzner',
+                'b2',
+            ]) {
+                expect(component.validatedTransferProfiles[name].hasError).toBe(false);
+                expect(component.validatedTransferProfiles[name].fields.region.error).toBe('');
+            }
+            expect(component.wizardStepStates.transferProfile.validSetup).toBe(true);
+        });
+
+        it('still validates Amazon S3 regions against the AWS Region list', () => {
+            expect(component.validatedTransferProfiles['aws'].fields.region.error).toBe('Invalid AWS region');
+        });
+
+        it('names the AWS named profile only for that auth method', () => {
+            expect(component.validatedTransferProfiles['aws'].fields.profile.title).toBe('AWS named profile');
+            expect(component.validatedTransferProfiles['r2'].fields.profile).toEqual({
+                title: 'Authentication',
+                value: 'Access keys',
+                error: '',
+            });
         });
     });
 });

@@ -199,7 +199,8 @@ protocols:
           enabled: false   # Default: off (admin can enable if needed)
         chunkSize: 25
         enableMetadataFilter: true
-        endpoint: ""
+        endpoint: ""  # Amazon S3: leave empty. Other providers: full URL, plus provider/pathStyle/authMethod,
+                      # see docs/S3-Compatible-Providers.md
         fileOrder: []
         filter: ""
         maxAge: ""

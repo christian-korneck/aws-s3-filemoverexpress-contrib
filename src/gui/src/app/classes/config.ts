@@ -10,6 +10,7 @@ import {
     DEFAULT_REPORTS_SETTINGS,
     DEFAULT_S3_CONFIG,
 } from '../constants/config';
+import { presetFor, providerFromProto, providerToProto, ProviderType } from '../constants/providers.constants';
 import { create } from '@bufbuild/protobuf';
 
 export class FmeConfig implements ConfigInterfaces.FmeConfig {
@@ -343,6 +344,13 @@ export class TransferProfile implements ConfigInterfaces.ConfigTransferProfile {
         public oidcSessionDurationSeconds?: number,
         public oidcPersistSession?: boolean,
         public oidcCustomCaBundle?: string,
+        public provider?: ProviderType,
+        public pathStyle?: boolean,
+        public accessKeyId?: string,
+        public secretAccessKey?: string,
+        public sessionToken?: string,
+        public tlsCaBundle?: string,
+        public tlsSkipVerify?: boolean,
     ) {
     }
 
@@ -354,6 +362,8 @@ export class TransferProfile implements ConfigInterfaces.ConfigTransferProfile {
         let authMethod = 'aws-profile';
         if (input.authMethod === proto.AuthMethod.OIDC) {
             authMethod = 'oidc';
+        } else if (input.authMethod === proto.AuthMethod.STATIC_KEYS) {
+            authMethod = 'static-keys';
         }
 
         return new TransferProfile(
@@ -381,6 +391,13 @@ export class TransferProfile implements ConfigInterfaces.ConfigTransferProfile {
             input.oidcConfig?.sessionDurationSeconds ?? 0,
             input.oidcConfig?.persistSession ?? false,
             input.oidcConfig?.customCaBundle ?? '',
+            providerFromProto(input.provider),
+            input.pathStyle ?? false,
+            input.staticCredentials?.accessKeyId ?? '',
+            input.staticCredentials?.secretAccessKey ?? '',
+            input.staticCredentials?.sessionToken ?? '',
+            input.tls?.caBundle ?? '',
+            input.tls?.skipVerify ?? false,
         );
     }
 
@@ -410,6 +427,13 @@ export class TransferProfile implements ConfigInterfaces.ConfigTransferProfile {
             input.oidcSessionDurationSeconds ?? 0,
             input.oidcPersistSession ?? false,
             input.oidcCustomCaBundle ?? '',
+            presetFor(input.provider).key,
+            input.pathStyle ?? false,
+            input.accessKeyId ?? '',
+            input.secretAccessKey ?? '',
+            input.sessionToken ?? '',
+            input.tlsCaBundle ?? '',
+            input.tlsSkipVerify ?? false,
         );
     }
 
@@ -430,11 +454,26 @@ export class TransferProfile implements ConfigInterfaces.ConfigTransferProfile {
         transferProfile.filter = input.filter;
         transferProfile.checksums = Checksums.jsonToProtobuf(input.checksums);
         transferProfile.autoTuning = input.autoTuning;
-        transferProfile.endpoint = input.endpoint;
+        transferProfile.endpoint = (input.endpoint ?? '').trim();
+
+        // Provider, addressing style and endpoint TLS settings
+        transferProfile.provider = providerToProto(input.provider);
+        transferProfile.pathStyle = input.pathStyle ?? false;
+        const tls = create(proto.EndpointTlsSettingsSchema);
+        tls.caBundle = input.tlsCaBundle ?? '';
+        tls.skipVerify = input.tlsSkipVerify ?? false;
+        transferProfile.tls = tls;
 
         // Map auth method
         if (input.authMethod === 'oidc') {
             transferProfile.authMethod = proto.AuthMethod.OIDC;
+        } else if (input.authMethod === 'static-keys') {
+            transferProfile.authMethod = proto.AuthMethod.STATIC_KEYS;
+            const staticCredentials = create(proto.StaticCredentialsSchema);
+            staticCredentials.accessKeyId = input.accessKeyId ?? '';
+            staticCredentials.secretAccessKey = input.secretAccessKey ?? '';
+            staticCredentials.sessionToken = input.sessionToken ?? '';
+            transferProfile.staticCredentials = staticCredentials;
         } else {
             transferProfile.authMethod = proto.AuthMethod.AWS_PROFILE;
         }

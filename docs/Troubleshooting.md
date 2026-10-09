@@ -129,6 +129,16 @@ ExpiredToken: The provided token has expired.
    - Ensure you're editing the correct user's configuration file
    - Check `filemoverexpress_CONFIG_DIR` environment variable
 
+### S3-Compatible Provider Errors
+
+**Errors**: `SignatureDoesNotMatch`, `no such host`, `x509: certificate signed by unknown authority`,
+`an endpoint URL is required for this S3 provider`, `NotImplemented`
+
+These usually mean the Remote Configuration's provider settings (endpoint URL, region, path-style addressing, TLS
+trust) do not match what the service expects. Use **Test connection** in the GUI or
+`filemoverexpress validate-credentials <name>` to reproduce, then see the troubleshooting table in
+[S3-Compatible Providers](S3-Compatible-Providers.md#troubleshooting).
+
 ### Network and I/O Errors
 
 **Error**: `FATAL [202X-XX-XX XX:XX:XX] Unrecoverable error: retryable: RequestError:`

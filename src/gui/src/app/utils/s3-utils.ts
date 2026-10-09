@@ -18,11 +18,11 @@ const s3ErrorCodes: Record<string, string> = {
     'NoCredentialProviders': `Missing credentials for the Remote Configuration "${transferProfilePlaceholder}". Update your credentials and try again.`,
     'InvalidToken': `Invalid credentials or invalid Region provided for this Remote Configuration. Update your credentials or update the Region for the Remote Configuration "${transferProfilePlaceholder}".`,
     // region errors
-    'RequestError': `Unable to make request. Update the AWS Region for the Remote Configuration "${transferProfilePlaceholder}" to a valid AWS Region.`,
-    'MissingRegion': `Missing AWS Region for the Remote Configuration "${transferProfilePlaceholder}". Update the Region to the one that the S3 Bucket is in.`,
-    'IllegalLocationConstraintException': `The AWS Region set for the Remote Configuration "${transferProfilePlaceholder}" isn't enabled for the account. Update the Region to the one that the S3 Bucket is in.`,
-    'MissingEndpoint': `S3 Bucket name is missing or AWS Region is invalid. Verify that the S3 Bucket name and Region are set correctly for the Remote Configuration "${transferProfilePlaceholder}".`,
-    'SignatureDoesNotMatch': `SignatureDoesNotMatch error occurred. The request signature that the server calculated does not match the signature that you provided. Verify that the S3 Bucket name, AWS Region, and credentials are set correctly for the Remote Configuration "${transferProfilePlaceholder}".`,
+    'RequestError': `Unable to make request. Verify the Region and endpoint for the Remote Configuration "${transferProfilePlaceholder}".`,
+    'MissingRegion': `Missing Region for the Remote Configuration "${transferProfilePlaceholder}". Update the Region to the one that the S3 Bucket is in.`,
+    'IllegalLocationConstraintException': `The Region set for the Remote Configuration "${transferProfilePlaceholder}" isn't enabled for the account. Update the Region to the one that the S3 Bucket is in.`,
+    'MissingEndpoint': `S3 Bucket name is missing or Region is invalid. Verify that the S3 Bucket name and Region are set correctly for the Remote Configuration "${transferProfilePlaceholder}".`,
+    'SignatureDoesNotMatch': `SignatureDoesNotMatch error occurred. The request signature that the server calculated does not match the signature that you provided. Verify that the S3 Bucket name, Region, and credentials are set correctly for the Remote Configuration "${transferProfilePlaceholder}".`,
     // bucket errors
     'InvalidBucketName': `S3 Bucket name is invalid. Update the S3 Bucket name for the Remote Configuration "${transferProfilePlaceholder}".`,
     'NoSuchBucket': `S3 Bucket doesn't exist. Update the S3 Bucket name for the Remote Configuration "${transferProfilePlaceholder}".`,

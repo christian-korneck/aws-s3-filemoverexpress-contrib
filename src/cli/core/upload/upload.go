@@ -15,7 +15,7 @@ func Uploader(job *jobmanagertypes.Job) {
 	jobManager := job_manager.GetInstance()
 	_, sessErr := jobManager.GetS3Manager(transferProfile)
 	if sessErr != nil {
-		events.Events.Error(strFailedEstablishingAwsSession)
+		events.Events.Error(strFailedEstablishingS3Session)
 		return
 	}
 	basePath := job.UploadBasePath()

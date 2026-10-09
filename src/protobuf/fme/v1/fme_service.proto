@@ -44,6 +44,7 @@ service FmeService {
     rpc InitiateOIDCLogin (fme.v1.OIDCLoginRequest) returns (fme.v1.OIDCLoginResponse) {}
     rpc GetOIDCStatus (fme.v1.OIDCStatusRequest) returns (fme.v1.OIDCStatusResponse) {}
     rpc LogoutOIDC (fme.v1.OIDCLogoutRequest) returns (fme.v1.OIDCLogoutResponse) {}
+    rpc ValidateTransferProfile (fme.v1.ValidateTransferProfileRequest) returns (fme.v1.ValidateTransferProfileResponse) {}
 }
 
 // ListEventsRequest and Response must be in the main file, as it uses values from each sub-file and would otherwise

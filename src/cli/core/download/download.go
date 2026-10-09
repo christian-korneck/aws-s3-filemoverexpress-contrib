@@ -13,7 +13,7 @@ func Downloader(job *jobmanagertypes.Job) {
 	jobManager := job_manager.GetInstance()
 	_, sessErr := jobManager.GetS3Manager(transferProfile)
 	if sessErr != nil {
-		events.Events.Error(strFailedEstablishingAwsSession, sessErr)
+		events.Events.Error(strFailedEstablishingS3Session, sessErr)
 		return
 	}
 

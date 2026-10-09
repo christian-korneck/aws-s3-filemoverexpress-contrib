@@ -10,13 +10,14 @@ import { MatStep, MatStepLabel, MatStepper, MatStepperNext, MatStepperPrevious }
 import { MatTooltip } from '@angular/material/tooltip';
 import { TransferProfile } from '@app/classes/config';
 import { sectionTitles } from '@app/constants/common.constants';
+import { presetFor } from '@app/constants/providers.constants';
 import { docsLinks } from '@app/constants/external-links';
 import { validateBucket, validateName, validateRegion } from '@app/utils/config-utils';
 import { isPackagedApp } from '@app/utils/utils';
 import { TransferProfileFormComponent } from '@containers/forms/transfer-profile-form/transfer-profile-form.component';
 import { TransferProfileForm } from '@containers/forms/transfer-profile-form/transfer-profile-form.interfaces';
 import { RegionsService } from '@services/regions/regions.service';
-import { SetupWizardConfig, SetupWizardData, ValidatedTransferProfile, WizardStepStates } from './setup-wizard-modal.interfaces';
+import { SetupWizardConfig, SetupWizardData, ValidatedField, ValidatedTransferProfile, WizardStepStates } from './setup-wizard-modal.interfaces';
 import {
     checksumAlgorithms,
     createTransferProfileForm,
@@ -132,7 +133,7 @@ export class SetupWizardModalComponent implements AfterViewInit {
                 const transferProfile = this.initialData.transferProfiles[transferProfileName];
                 const nameError = validateName(transferProfile.name);
                 const bucketError = validateBucket(transferProfile.bucket);
-                const regionError = validateRegion(transferProfile.region, this.regions);
+                const regionError = validateRegion(transferProfile.region, this.regions, transferProfile.provider);
                 const hasError = !!(nameError || bucketError || regionError);
                 if (hasError) {
                     this.transferProfilesHaveErrors = true;
@@ -158,11 +159,7 @@ export class SetupWizardModalComponent implements AfterViewInit {
                             value: transferProfile.region,
                             error: regionError,
                         },
-                        profile: {
-                            title: 'AWS named profile',
-                            value: transferProfile.profile,
-                            error: '',
-                        },
+                        profile: authenticationField(transferProfile),
                     },
                 };
             },
@@ -233,4 +230,20 @@ export class SetupWizardModalComponent implements AfterViewInit {
     }
 
     protected readonly Object = Object;
+}
+
+/** The profile row names the AWS named profile only when that is how the configuration authenticates. */
+function authenticationField(transferProfile: TransferProfile): ValidatedField {
+    if (transferProfile.authMethod === 'static-keys' || transferProfile.authMethod === 'oidc') {
+        return {
+            title: 'Authentication',
+            value: transferProfile.authMethod === 'oidc' ? 'OIDC / SSO' : 'Access keys',
+            error: '',
+        };
+    }
+    return {
+        title: presetFor(transferProfile.provider).isAws ? 'AWS named profile' : 'Credentials profile',
+        value: transferProfile.profile,
+        error: '',
+    };
 }

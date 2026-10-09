@@ -26,7 +26,14 @@ import {
 } from '@classes/grpc';
 import { CallbackClient, Code, ConnectError, createCallbackClient, Interceptor } from '@connectrpc/connect';
 import { createGrpcWebTransport } from '@connectrpc/connect-web';
-import { GetConfigurationRequestSchema, GRPCFmeConfig, SetConfigurationResponse } from '@gen/es/fme/v1/config_pb';
+import {
+    GetConfigurationRequestSchema,
+    GRPCFmeConfig,
+    SetConfigurationResponse,
+    TransferProfile as TransferProfileMessage,
+    ValidateTransferProfileRequestSchema,
+    ValidateTransferProfileResponse,
+} from '@gen/es/fme/v1/config_pb';
 import { EventType } from '@gen/es/fme/v1/events_pb';
 import { FmeService, ListEventsRequestSchema, ListEventsResponse } from '@gen/es/fme/v1/fme_service_pb';
 import { InventoryReportRequestSchema, InventoryReportResponse } from '@gen/es/fme/v1/inventory_pb';
@@ -1256,6 +1263,32 @@ export class FmeClientService {
         this.connectClient.logoutOIDC(
             req,
             (err: ConnectError | undefined, res: OIDCLogoutResponse) => {
+                if (err) {
+                    sub.error(err);
+                    return;
+                }
+                sub.next(res);
+                sub.complete();
+            },
+        );
+        return sub.asObservable();
+    }
+
+    /**
+     * Asks the daemon to connect to the (possibly unsaved) Remote Configuration and list its bucket.
+     * Connection problems come back in the response body (`success: false`), not as an error.
+     */
+    validateTransferProfile(transferProfile: TransferProfileMessage): Observable<ValidateTransferProfileResponse> {
+        const sub = new Subject<ValidateTransferProfileResponse>();
+        const req = create(ValidateTransferProfileRequestSchema);
+        req.transferProfile = transferProfile;
+        if (!this.connectClient) {
+            sub.error(new StreamingClientError(StreamingClientErrorType.StreamingClientNull));
+            return sub.asObservable();
+        }
+        this.connectClient.validateTransferProfile(
+            req,
+            (err: ConnectError | undefined, res: ValidateTransferProfileResponse) => {
                 if (err) {
                     sub.error(err);
                     return;

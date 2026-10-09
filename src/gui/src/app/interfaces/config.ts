@@ -1,3 +1,4 @@
+import { ProviderType } from '@app/constants/providers.constants';
 import * as proto from '@gen/es/fme/v1/config_pb';
 
 export type FmeConfigSection =
@@ -82,6 +83,16 @@ export interface ConfigTransferProfile {
     oidcSessionDurationSeconds?: number;
     oidcPersistSession?: boolean;
     oidcCustomCaBundle?: string;
+    // S3-compatible provider settings (see constants/providers.constants.ts)
+    provider?: ProviderType;
+    pathStyle?: boolean;
+    // static access keys (visible when authMethod === 'static-keys')
+    accessKeyId?: string;
+    secretAccessKey?: string;
+    sessionToken?: string;
+    // endpoint TLS settings
+    tlsCaBundle?: string;
+    tlsSkipVerify?: boolean;
 }
 
 export interface Paths {

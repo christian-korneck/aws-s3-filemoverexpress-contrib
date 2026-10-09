@@ -1,7 +1,9 @@
 import { FormControl, FormGroup } from '@angular/forms';
+import { ProviderType } from '@app/constants/providers.constants';
 
 export type EditorMode = 'add' | 'update';
-export type AuthMethodType = 'aws-profile' | 'oidc';
+export type AuthMethodType = 'aws-profile' | 'oidc' | 'static-keys';
+export type TestConnectionState = 'idle' | 'testing' | 'ok' | 'error';
 
 export interface TransferProfileForm {
     name: FormControl<string>;
@@ -9,8 +11,17 @@ export interface TransferProfileForm {
     region: FormControl<string>;
     profile: FormControl<string>;
 
+    // S3 provider (Amazon S3 or an S3-compatible service)
+    provider: FormControl<ProviderType>;
+    pathStyle: FormControl<boolean>;
+
     // authentication method
     authMethod: FormControl<AuthMethodType>;
+
+    // static access keys (visible when authMethod === 'static-keys')
+    accessKeyId: FormControl<string>;
+    secretAccessKey: FormControl<string>;
+    sessionToken: FormControl<string>;
 
     // OIDC settings (visible when authMethod === 'oidc')
     oidcIssuerUrl: FormControl<string>;
@@ -20,6 +31,10 @@ export interface TransferProfileForm {
     oidcSessionDurationSeconds: FormControl<number>;
     oidcPersistSession: FormControl<boolean>;
     oidcCustomCaBundle: FormControl<string>;
+
+    // endpoint TLS settings
+    tlsCaBundle: FormControl<string>;
+    tlsSkipVerify: FormControl<boolean>;
 
     // advanced settings
     accelerated: FormControl<boolean>;

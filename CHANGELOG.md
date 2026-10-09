@@ -3,6 +3,21 @@
 
 ## Unreleased
 
+Adds support for S3-compatible storage providers.
+
+### Added
+
+* **S3-compatible providers**: A Remote Configuration can now target MinIO, Cloudflare R2, Backblaze B2, Wasabi, DigitalOcean Spaces, Hetzner Object Storage or any other S3-compatible endpoint, not only Amazon S3. The Connection tab gains a **Storage provider** selector that prefills the provider's endpoint pattern, region default and path-style addressing, an **Access keys** authentication method (key ID / secret / optional session token, stored in the configuration file and redacted from support files), per-configuration TLS options (custom CA bundle, skip-verify with a warning) and a **Test connection** button backed by a new `ValidateTransferProfile` RPC. The daemon relaxes the AWS SDK's request-checksum defaults, skips STS session checks and omits AWS-only storage classes for non-Amazon providers, and deletes by key where object versioning is unavailable. New `provider`, `pathStyle`, `staticCredentials` and `tls` keys in `configuration.yaml`; existing configurations keep working unchanged. Stored secrets are never sent to the GUI, and `configuration.yaml` is now saved with owner-only permissions on every write. See the [S3-Compatible Providers guide](docs/S3-Compatible-Providers.md).
+
+### Changed
+
+* **`validate-credentials`** help text no longer refers to AWS only; the command exercises whichever provider, endpoint and credentials a Remote Configuration uses.
+* **Deleting and renaming S3 objects** falls back to key-based deletion when the endpoint does not implement `ListObjectVersions`, and to single-object deletes when it rejects batch deletion. Version listings tolerate missing `VersionId` / `IsLatest` fields.
+* **`--profile`** CLI flag is now marked deprecated. It was never read; credentials always come from the Remote Configuration.
+* S3 requests made with an OIDC session now carry the File Mover Express user agent, like the other credential methods.
+
+## 1.1.0
+
 Adds single sign-on authentication and a refreshed GUI, along with a batch of usability fixes to file management, job handling, and the transfer tray.
 
 ### Added

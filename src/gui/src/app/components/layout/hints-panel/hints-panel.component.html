@@ -154,6 +154,101 @@
         </section>
     </div>
 }
+@if (mode === 'transfer-profile-provider') {
+    <div>
+        <section>
+            <h2>Storage provider</h2>
+            <p>
+                File Mover Express talks to Amazon S3 and to any service that implements the S3 API, such as MinIO,
+                Cloudflare R2, Backblaze B2, Wasabi, DigitalOcean Spaces, Hetzner Object Storage, Ceph or Garage. Choosing a provider prefills
+                its endpoint pattern, region default and addressing style; every value stays editable.
+            </p>
+        </section>
+        <section>
+            <h2>Endpoint URL</h2>
+            <p>
+                The base URL of the provider's S3 API, including <code>https://</code> (or <code>http://</code> for a
+                local test server). For Amazon S3 leave it empty unless you use an S3 Access Point or VPC endpoint.
+            </p>
+            <ul>
+                <li>MinIO: <code>https://minio.example.com:9000</code> (the API port, not the console)</li>
+                <li>Cloudflare R2: <code>https://&lt;account id&gt;.r2.cloudflarestorage.com</code></li>
+                <li>Backblaze B2: <code>https://s3.&lt;region&gt;.backblazeb2.com</code></li>
+                <li>Wasabi: <code>https://s3.&lt;region&gt;.wasabisys.com</code></li>
+                <li>DigitalOcean Spaces: <code>https://&lt;region&gt;.digitaloceanspaces.com</code></li>
+                <li>Hetzner Object Storage: <code>https://&lt;location&gt;.your-objectstorage.com</code> (fsn1, nbg1 or hel1)</li>
+            </ul>
+        </section>
+        <section>
+            <h2>Region</h2>
+            <p>
+                S3 request signing always needs a region name. Amazon S3 requires the bucket's real Region. Backblaze
+                and Wasabi expect the region in the endpoint. Hetzner uses the bucket's location code
+                (<code>fsn1</code>, <code>nbg1</code> or <code>hel1</code>). Cloudflare R2 uses <code>auto</code>. MinIO,
+                DigitalOcean Spaces and most other stores accept <code>us-east-1</code>.
+            </p>
+        </section>
+        <section>
+            <h2>Path-style addressing</h2>
+            <p>
+                S3 clients either put the bucket in the hostname (<code>bucket.endpoint/key</code>, "virtual-hosted")
+                or in the path (<code>endpoint/bucket/key</code>). Self-hosted stores without wildcard DNS need
+                path-style; the big hosted providers support virtual-hosted style. If listing the bucket fails with a
+                name-resolution or signature error, try the other setting.
+            </p>
+        </section>
+        <section>
+            <h2>What changes for non-Amazon providers</h2>
+            <p>
+                OIDC / SSO sign-in is Amazon-only (it relies on AWS STS), Transfer Acceleration and AWS storage
+                classes are not sent, and FME relaxes the request checksums the AWS SDK adds by default, which several
+                S3-compatible services reject. Providers without object versioning are deleted by key.
+            </p>
+        </section>
+    </div>
+}
+@if (mode === 'transfer-profile-tls') {
+    <div>
+        <section>
+            <h2>Custom CA bundle</h2>
+            <p>
+                A PEM file, on the machine running the daemon, with the certificate authority that signed your
+                endpoint's certificate. It is added to the system trust store for this Remote Configuration only.
+                Use it for corporate CAs or self-hosted MinIO / Ceph behind an internal certificate.
+            </p>
+        </section>
+        <section>
+            <h2>Skip TLS certificate verification</h2>
+            <p>
+                Disables certificate checks entirely, so FME cannot tell your endpoint from an impostor and
+                credentials could be exposed to anyone on the network path. Prefer adding the CA bundle. If you must
+                turn this on, do it only for trusted lab networks; a warning is written to the Logs once per Remote
+                Configuration each time the daemon starts.
+            </p>
+        </section>
+    </div>
+}
+@if (mode === 'transfer-profile-static-keys') {
+    <div>
+        <section>
+            <h2>Access keys</h2>
+            <p>
+                An access key ID and secret access key issued by your storage provider (for example a MinIO user,
+                a Cloudflare R2 API token, a Backblaze application key or a Wasabi access key). FME signs requests
+                with them directly, so no AWS CLI profile is needed on the daemon machine.
+            </p>
+            <p>
+                The keys are stored in the daemon's configuration file (owner-only permissions on macOS/Linux).
+                They are redacted from support files, never written to the logs, and the stored secret is never sent
+                back to this app: leave the secret empty when editing to keep it. Prefer a key that is limited to the bucket you transfer to.
+            </p>
+            <p>
+                The session token is only needed for temporary credentials. FME does not refresh it; save the
+                configuration again when the token is rotated.
+            </p>
+        </section>
+    </div>
+}
 
 <ng-template #extraBucketHelp>
     <p>
@@ -243,7 +338,8 @@
         <section>
             <h2>S3 Access Point / VPC Endpoint</h2>
             <p>
-                The endpoint used by the S3 client. This field can be used to integrate with
+                The endpoint used by the S3 client. For S3-compatible providers (MinIO, Cloudflare R2, Backblaze B2,
+                ...) this is the base URL of their S3 API. For Amazon S3 this field can be used to integrate with
                 <a (click)="openExternalLink($event,'https://docs.aws.amazon.com/AmazonS3/latest/userguide/privatelink-interface-endpoints.html')"
                    class="link-with-icon">
                     AWS Private Link

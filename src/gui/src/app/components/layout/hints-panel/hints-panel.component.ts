@@ -1,11 +1,11 @@
 import { NgTemplateOutlet } from '@angular/common';
-import { Component, inject, InjectionToken, ChangeDetectionStrategy } from '@angular/core';
+import { Component, inject, ChangeDetectionStrategy } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import { isPackagedApp } from '@app/utils/utils';
 import { WailsService } from '@services/wails/wails.service';
+import { HINT_POPOVER_MODE } from './hints-panel.token';
 
-/** The hint "mode" (which help section to show), supplied by HintPopoverService via the portal injector. */
-export const HINT_POPOVER_MODE = new InjectionToken<string>('HINT_POPOVER_MODE');
+export { HINT_POPOVER_MODE } from './hints-panel.token';
 
 @Component({
     selector: 'fme-hints-panel',

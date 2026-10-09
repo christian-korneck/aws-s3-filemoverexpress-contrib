@@ -1,6 +1,7 @@
 import { TransferProfile } from '@classes/config';
 import { FormControl, Validators } from '@angular/forms';
 import { noSpacesValidator, oneOfValidator } from '@classes/form-validators';
+import { presetFor } from '@app/constants/providers.constants';
 
 export function validTransferProfileExists(transferProfiles: Record<string, TransferProfile>, regions: string[]): boolean {
     const numTransferProfiles = Object.keys(transferProfiles).length;
@@ -13,7 +14,7 @@ export function validTransferProfileExists(transferProfiles: Record<string, Tran
         (transferProfile) => {
             const nameError = validateName(transferProfile.name);
             const bucketError = validateBucket(transferProfile.bucket);
-            const regionError = validateRegion(transferProfile.region, regions);
+            const regionError = validateRegion(transferProfile.region, regions, transferProfile.provider);
             const hasError = !!(nameError || bucketError || regionError);
             if (!hasError) {
                 atLeastOneValid = true;
@@ -46,7 +47,14 @@ export function validateBucket(bucket: string) {
     return '';
 }
 
-export function validateRegion(region: string, regions: string[]) {
+/**
+ * Validates a Remote Configuration's region. Only Amazon S3 regions are checked against the AWS Region
+ * list; S3-compatible providers use their own region names (e.g. auto, fsn1, us-west-004).
+ */
+export function validateRegion(region: string, regions: string[], provider?: string) {
+    if (!presetFor(provider).isAws) {
+        return region ? '' : 'Region is required';
+    }
     const regionControl = new FormControl(region, [
         Validators.required, oneOfValidator(regions),
     ]);

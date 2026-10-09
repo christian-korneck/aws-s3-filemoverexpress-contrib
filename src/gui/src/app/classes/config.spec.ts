@@ -13,6 +13,7 @@ import {
     TransferProfile,
 } from '@classes/config';
 import * as proto from '@gen/es/fme/v1/config_pb';
+import { REDACTED_SECRET } from '@app/constants/providers.constants';
 
 const txpData: ConfigInterfaces.ConfigTransferProfile = {
     name: 'name',
@@ -431,3 +432,108 @@ function setCommonPbTxpData(pb: proto.TransferProfile, inputConfig: ConfigInterf
     pb.autoTuning = inputConfig.autoTuning;
     pb.endpoint = inputConfig.endpoint;
 }
+
+describe('TransferProfile S3-compatible provider settings', () => {
+    const minioData: ConfigInterfaces.ConfigTransferProfile = {
+        ...txpData,
+        name: 'minio-local',
+        endpoint: 'http://nas.local:9000',
+        authMethod: 'static-keys',
+        provider: 'minio',
+        pathStyle: true,
+        accessKeyId: 'minioadmin',
+        secretAccessKey: 's3cr3t',
+        sessionToken: 'tok',
+        tlsCaBundle: '/etc/ca.pem',
+        tlsSkipVerify: true,
+    };
+
+    it('maps provider, keys and TLS settings to protobuf', () => {
+        const pb = TransferProfile.jsonToProtobuf(minioData);
+        expect(pb.provider).toBe(proto.S3Provider.MINIO);
+        expect(pb.pathStyle).toBe(true);
+        expect(pb.authMethod).toBe(proto.AuthMethod.STATIC_KEYS);
+        expect(pb.staticCredentials?.accessKeyId).toBe('minioadmin');
+        expect(pb.staticCredentials?.secretAccessKey).toBe('s3cr3t');
+        expect(pb.staticCredentials?.sessionToken).toBe('tok');
+        expect(pb.tls?.caBundle).toBe('/etc/ca.pem');
+        expect(pb.tls?.skipVerify).toBe(true);
+    });
+
+    it('round-trips through protobuf', () => {
+        const txp = TransferProfile.fromProtobuf(TransferProfile.jsonToProtobuf(minioData));
+        expect(txp.provider).toBe('minio');
+        expect(txp.pathStyle).toBe(true);
+        expect(txp.authMethod).toBe('static-keys');
+        expect(txp.accessKeyId).toBe('minioadmin');
+        expect(txp.secretAccessKey).toBe('s3cr3t');
+        expect(txp.sessionToken).toBe('tok');
+        expect(txp.tlsCaBundle).toBe('/etc/ca.pem');
+        expect(txp.tlsSkipVerify).toBe(true);
+    });
+
+    it('omits static credentials unless the auth method is static-keys', () => {
+        const pb = TransferProfile.jsonToProtobuf({...minioData, authMethod: 'aws-profile'});
+        expect(pb.authMethod).toBe(proto.AuthMethod.AWS_PROFILE);
+        expect(pb.staticCredentials).toBeUndefined();
+    });
+
+    it('treats legacy profiles as Amazon S3 with safe defaults', () => {
+        const legacy = TransferProfile.fromJson(txpData);
+        expect(legacy.provider).toBe('aws');
+        expect(legacy.pathStyle).toBe(false);
+        expect(legacy.accessKeyId).toBe('');
+        expect(legacy.tlsSkipVerify).toBe(false);
+
+        const fromWire = TransferProfile.fromProtobuf(TransferProfile.jsonToProtobuf(txpData));
+        expect(fromWire.provider).toBe('aws');
+        expect(fromWire.authMethod).toBe('aws-profile');
+
+        // Configurations written before the provider field existed arrive as UNSPECIFIED.
+        const legacyMessage = TransferProfile.jsonToProtobuf(txpData);
+        legacyMessage.provider = proto.S3Provider.UNSPECIFIED;
+        legacyMessage.tls = undefined;
+        const unspecified = TransferProfile.fromProtobuf(legacyMessage);
+        expect(unspecified.provider).toBe('aws');
+        expect(unspecified.tlsCaBundle).toBe('');
+    });
+
+    it('maps an unknown provider id to the generic S3-compatible provider', () => {
+        const txp = TransferProfile.fromJson({...minioData, provider: 'bogus' as never});
+        expect(txp.provider).toBe('other');
+        expect(TransferProfile.jsonToProtobuf(txp).provider).toBe(proto.S3Provider.OTHER);
+    });
+
+    it('sends TLS settings but no static credentials for a named profile', () => {
+        const pb = TransferProfile.jsonToProtobuf({...minioData, authMethod: 'aws-profile', profile: 'lab'});
+        expect(pb.profile).toBe('lab');
+        expect(pb.tls?.caBundle).toBe('/etc/ca.pem');
+        expect(pb.tls?.skipVerify).toBe(true);
+        expect(pb.staticCredentials).toBeUndefined();
+    });
+
+    it('sends an empty session token for long-lived access keys', () => {
+        const pb = TransferProfile.jsonToProtobuf({...minioData, sessionToken: ''});
+        expect(pb.staticCredentials?.secretAccessKey).toBe('s3cr3t');
+        expect(pb.staticCredentials?.sessionToken).toBe('');
+    });
+
+    it('passes redacted secrets through unchanged so the daemon keeps the stored values', () => {
+        const pb = TransferProfile.jsonToProtobuf({
+            ...minioData,
+            secretAccessKey: REDACTED_SECRET,
+            sessionToken: REDACTED_SECRET,
+        });
+        expect(pb.staticCredentials?.secretAccessKey).toBe(REDACTED_SECRET);
+        expect(pb.staticCredentials?.sessionToken).toBe(REDACTED_SECRET);
+
+        const txp = TransferProfile.fromProtobuf(pb);
+        expect(txp.secretAccessKey).toBe(REDACTED_SECRET);
+        expect(txp.sessionToken).toBe(REDACTED_SECRET);
+    });
+
+    it('trims the endpoint', () => {
+        const pb = TransferProfile.jsonToProtobuf({...minioData, endpoint: '  http://nas.local:9000 \n'});
+        expect(pb.endpoint).toBe('http://nas.local:9000');
+    });
+});

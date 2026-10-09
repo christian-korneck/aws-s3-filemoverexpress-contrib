@@ -15,7 +15,7 @@
             </mat-form-field>
             <mat-form-field color="accent">
                 <mat-label>S3 bucket</mat-label>
-                <input matInput type="text" formControlName="bucket" placeholder="myawsbucket"
+                <input matInput type="text" formControlName="bucket" placeholder="my-bucket"
                        (paste)="onBucketPaste($event)" (blur)="onBucketBlur($event)">
                 <mat-hint #bucketHint [hidden]="!tutorialMode() && (bucketHint.innerHTML === getOriginalHint(bucketHint.innerHTML))">
                     <span>The name of the S3 bucket that you want to upload to and download from.
@@ -69,6 +69,18 @@
                     <!-- CONNECTION -->
                     <div class="tab-body" [hidden]="activeTab !== 'connection'">
                         <mat-form-field color="accent">
+                            <mat-label>Storage provider</mat-label>
+                            <mat-select formControlName="provider" (selectionChange)="onProviderSelected($event.value)">
+                                @for (p of providerPresets; track p.key) {
+                                    <mat-option [value]="p.key">{{ p.label }}</mat-option>
+                                }
+                            </mat-select>
+                            <mat-hint>Amazon S3 or any S3-compatible service. Picking a provider prefills its endpoint and defaults.
+                                <a (click)="toggleHint($event, 'transfer-profile-provider')">Info</a>
+                            </mat-hint>
+                        </mat-form-field>
+
+                        <mat-form-field color="accent">
                             <mat-label>Remote Configuration name</mat-label>
                             <input matInput type="text" formControlName="name">
                             @if (transferProfileForm.controls['name'].hasError('required')) {
@@ -82,7 +94,7 @@
                         <div class="form-grid-2">
                             <mat-form-field color="accent">
                                 <mat-label>S3 bucket</mat-label>
-                                <input matInput type="text" formControlName="bucket" placeholder="myawsbucket"
+                                <input matInput type="text" formControlName="bucket" placeholder="my-bucket"
                                        (paste)="onBucketPaste($event)" (blur)="onBucketBlur($event)">
                                 <mat-hint #bucketHint
                                           [hidden]="bucketHint.innerHTML === getOriginalHint(bucketHint.innerHTML)"></mat-hint>
@@ -93,24 +105,61 @@
                                     <mat-error [innerHTML]="getBucketError()"></mat-error>
                                 }
                             </mat-form-field>
-                            <mat-form-field color="accent">
-                                <mat-label>AWS Region</mat-label>
-                                <mat-select formControlName="region">
-                                    @for (rgn of regions; track rgn) {
-                                        <mat-option [value]="rgn">{{ rgn }}</mat-option>
+                            @if (isAws) {
+                                <mat-form-field color="accent">
+                                    <mat-label>Region</mat-label>
+                                    <mat-select formControlName="region">
+                                        @for (rgn of regions; track rgn) {
+                                            <mat-option [value]="rgn">{{ rgn }}</mat-option>
+                                        }
+                                    </mat-select>
+                                    <mat-hint>{{ preset.regionHint }}</mat-hint>
+                                    @if (transferProfileForm.controls['region'].hasError('required')) {
+                                        <mat-error>{{ errorMessages.transferProfileRegion.required }}</mat-error>
                                     }
-                                </mat-select>
-                                @if (transferProfileForm.controls['region'].hasError('required')) {
-                                    <mat-error>{{ errorMessages.transferProfileRegion.required }}</mat-error>
-                                }
-                            </mat-form-field>
+                                </mat-form-field>
+                            } @else {
+                                <mat-form-field color="accent">
+                                    <mat-label>Region</mat-label>
+                                    <input matInput type="text" formControlName="region" [placeholder]="preset.defaultRegion">
+                                    <mat-hint>{{ preset.regionHint }}</mat-hint>
+                                    @if (transferProfileForm.controls['region'].hasError('required')) {
+                                        <mat-error>{{ errorMessages.transferProfileRegion.required }}</mat-error>
+                                    }
+                                </mat-form-field>
+                            }
                         </div>
 
                         <mat-form-field color="accent">
-                            <mat-label>S3 Access Point / VPC Endpoint</mat-label>
-                            <input matInput type="text" formControlName="endpoint">
-                            <mat-hint>Optional</mat-hint>
+                            <mat-label>{{ isAws ? 'S3 Access Point / VPC Endpoint' : 'Endpoint URL' }}</mat-label>
+                            <input matInput type="text" formControlName="endpoint" [placeholder]="endpointPlaceholder"
+                                   spellcheck="false">
+                            <mat-hint>{{ preset.endpointHint }}</mat-hint>
+                            @if (transferProfileForm.controls['endpoint'].hasError('required')) {
+                                <mat-error>{{ errorMessages.transferProfileEndpoint.required }}</mat-error>
+                            }
+                            @if (transferProfileForm.controls['endpoint'].hasError('invalidEndpoint')) {
+                                <mat-error>{{ errorMessages.transferProfileEndpoint.invalidEndpoint }}</mat-error>
+                            }
                         </mat-form-field>
+                        @if (insecureEndpoint) {
+                            <div class="toggle-note warning-hint endpoint-warning">
+                                <mat-icon class="warning-icon">warning</mat-icon>
+                                Plain <code>http://</code>: transferred data and signed requests are not encrypted. The secret
+                                access key itself is never sent.
+                            </div>
+                        }
+
+                        @if (!isAws) {
+                            <div class="form-field">
+                                <mat-slide-toggle formControlName="pathStyle">Use path-style addressing</mat-slide-toggle>
+                                <div class="toggle-note">
+                                    Sends requests as <code>endpoint/bucket/key</code> instead of <code>bucket.endpoint/key</code>.
+                                    Needed by most self-hosted stores (MinIO, Ceph); leave off for R2, B2, Wasabi and Spaces
+                                    unless their documentation says otherwise.
+                                </div>
+                            </div>
+                        }
 
                         <ng-container formGroupName="paths">
                             <div class="form-grid-2">
@@ -131,6 +180,51 @@
                                 </mat-form-field>
                             </div>
                         </ng-container>
+
+                        <div class="section-subhead">TLS</div>
+                        <div class="form-grid-2">
+                            <mat-form-field color="accent">
+                                <mat-label>Custom CA bundle</mat-label>
+                                <input matInput type="text" formControlName="tlsCaBundle" placeholder="/path/to/ca-bundle.pem">
+                                <fme-browse-button matSuffix mode="file" dialogTitle="Choose CA bundle"
+                                                   fileFilterName="PEM certificate" fileFilterPattern="*.pem"
+                                                   [startPath]="transferProfileForm.get('tlsCaBundle')?.value"
+                                                   (pathPicked)="transferProfileForm.get('tlsCaBundle')?.setValue($event);
+                                                                 transferProfileForm.get('tlsCaBundle')?.markAsDirty()">
+                                </fme-browse-button>
+                                <mat-hint>Optional PEM file on the daemon machine for private CAs.
+                                    <a (click)="toggleHint($event, 'transfer-profile-tls')">Info</a>
+                                </mat-hint>
+                            </mat-form-field>
+                            <div class="form-field">
+                                <mat-slide-toggle formControlName="tlsSkipVerify">Skip TLS certificate verification</mat-slide-toggle>
+                                @if (transferProfileForm.controls['tlsSkipVerify'].value) {
+                                    <div class="toggle-note warning-hint">
+                                        <mat-icon class="warning-icon">warning</mat-icon>
+                                        Insecure: the endpoint's identity is not checked. Only use on trusted lab networks.
+                                    </div>
+                                } @else {
+                                    <div class="toggle-note">Only for self-signed certificates you cannot add as a CA bundle.</div>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="test-connection">
+                            <fme-button type="stroked" icon="network_check" text="Test connection"
+                                        [onClick]="testConnection()" [disabled]="!canTestConnection()"></fme-button>
+                            <div class="test-connection-result" aria-live="polite">
+                                @if (testState === 'testing') {
+                                    <mat-spinner diameter="20"></mat-spinner>
+                                    <span class="test-connection-message">Connecting…</span>
+                                } @else if (testState === 'ok') {
+                                    <mat-icon class="test-connection-ok">check_circle</mat-icon>
+                                    <span class="test-connection-message">{{ testMessage }}</span>
+                                } @else if (testState === 'error') {
+                                    <mat-icon class="test-connection-error">error</mat-icon>
+                                    <span class="test-connection-message">{{ testMessage }}</span>
+                                }
+                            </div>
+                        </div>
                     </div>
 
                     <!-- AUTHENTICATION -->
@@ -138,15 +232,16 @@
                         <mat-form-field color="accent">
                             <mat-label>Authentication method</mat-label>
                             <mat-select formControlName="authMethod">
-                                <mat-option value="aws-profile">AWS Named Profile</mat-option>
-                                <mat-option value="oidc">OIDC / SSO</mat-option>
+                                <mat-option value="aws-profile">{{ isAws ? 'AWS named profile' : 'Shared credentials profile (~/.aws)' }}</mat-option>
+                                <mat-option value="static-keys">Access keys</mat-option>
+                                <mat-option value="oidc" [disabled]="!preset.supportsOidc">OIDC / SSO{{ preset.supportsOidc ? '' : ' (Amazon S3 only)' }}</mat-option>
                             </mat-select>
-                            <mat-hint>How FME authenticates with AWS for this profile.</mat-hint>
+                            <mat-hint>How FME authenticates with {{ isAws ? 'AWS' : preset.label }} for this profile.</mat-hint>
                         </mat-form-field>
 
                         @if (transferProfileForm.controls['authMethod'].value === 'aws-profile') {
                             <mat-form-field color="accent">
-                                <mat-label>AWS named profile</mat-label>
+                                <mat-label>{{ isAws ? 'AWS named profile' : 'Credentials profile name' }}</mat-label>
                                 <input matInput [matAutocomplete]="auto" #autoTrigger="matAutocompleteTrigger" type="text" formControlName="profile"
                                        placeholder="myawsprofile">
                                 <mat-icon matSuffix class="autocomplete-arrow" (click)="autoTrigger.openPanel()">arrow_drop_down</mat-icon>
@@ -155,12 +250,73 @@
                                         <mat-option [value]="profile">{{ profile }}</mat-option>
                                     }
                                 </mat-autocomplete>
-                                <mat-hint>An AWS named profile to use for S3 access. This must be a profile configured
-                                    on the machine running the daemon &mdash; not this app's machine when you're
+                                <mat-hint>A named profile from <code>~/.aws/credentials</code> to use for S3 access. This must be
+                                    configured on the machine running the daemon &mdash; not this app's machine when you're
                                     connected to a remote daemon.
                                     <a (click)="toggleHint($event, 'transfer-profile-general-profile')">Info</a>
                                 </mat-hint>
                             </mat-form-field>
+                        }
+
+                        @if (transferProfileForm.controls['authMethod'].value === 'static-keys') {
+                            <div class="oidc-config-card">
+                                <div class="oidc-config-title">
+                                    <mat-icon>vpn_key</mat-icon> Access keys
+                                </div>
+
+                                <p class="oidc-config-help">
+                                    Keys are stored in the daemon's configuration file (owner-only permissions on macOS/Linux)
+                                    and are redacted from support files.
+                                    <a (click)="toggleHint($event, 'transfer-profile-static-keys')">Info</a>
+                                </p>
+
+                                <mat-form-field color="accent">
+                                    <mat-label>Access key ID</mat-label>
+                                    <input matInput type="text" formControlName="accessKeyId" autocomplete="off" spellcheck="false">
+                                    @if (transferProfileForm.controls['accessKeyId'].hasError('required')) {
+                                        <mat-error>{{ errorMessages.transferProfileStaticKeys.accessKeyIdRequired }}</mat-error>
+                                    }
+                                </mat-form-field>
+
+                                <mat-form-field color="accent">
+                                    <mat-label>Secret access key</mat-label>
+                                    <input matInput [type]="showSecret ? 'text' : 'password'" [formControl]="secretInput"
+                                           class="secret-input" autocomplete="off" spellcheck="false">
+                                    <button mat-icon-button matSuffix type="button" class="secret-toggle"
+                                            [attr.aria-label]="showSecret ? 'Hide secret access key' : 'Show secret access key'"
+                                            (click)="showSecret = !showSecret">
+                                        <mat-icon>{{ showSecret ? 'visibility_off' : 'visibility' }}</mat-icon>
+                                    </button>
+                                    @if (hasSavedSecret && !secretInput.value) {
+                                        <mat-hint>Saved — leave empty to keep the current secret.</mat-hint>
+                                    }
+                                    @if (secretInput.hasError('required')) {
+                                        <mat-error>{{ secretMustBeReentered ? errorMessages.transferProfileStaticKeys.secretReenter
+                                            : errorMessages.transferProfileStaticKeys.secretRequired }}</mat-error>
+                                    }
+                                </mat-form-field>
+
+                                <mat-form-field color="accent">
+                                    <mat-label>Session token</mat-label>
+                                    <input matInput [type]="showSessionToken ? 'text' : 'password'" [formControl]="sessionTokenInput"
+                                           class="session-token-input" autocomplete="off" spellcheck="false">
+                                    <button mat-icon-button matSuffix type="button" class="session-token-toggle"
+                                            [attr.aria-label]="showSessionToken ? 'Hide session token' : 'Show session token'"
+                                            (click)="showSessionToken = !showSessionToken">
+                                        <mat-icon>{{ showSessionToken ? 'visibility_off' : 'visibility' }}</mat-icon>
+                                    </button>
+                                    @if (hasSavedSessionToken && !sessionTokenInput.value && !clearSessionToken.value) {
+                                        <mat-hint>Saved — leave empty to keep the current session token.</mat-hint>
+                                    } @else {
+                                        <mat-hint>Optional, for temporary credentials. Re-save this configuration when the token is rotated.</mat-hint>
+                                    }
+                                </mat-form-field>
+                                @if (hasSavedSessionToken && !sessionTokenInput.value) {
+                                    <mat-slide-toggle class="clear-session-token" [formControl]="clearSessionToken">
+                                        Remove saved session token
+                                    </mat-slide-toggle>
+                                }
+                            </div>
                         }
 
                         @if (transferProfileForm.controls['authMethod'].value === 'oidc') {
@@ -312,17 +468,25 @@
                             </div>
                         }
 
-                        <mat-form-field color="accent">
-                            <mat-label>Storage class</mat-label>
-                            <mat-select formControlName="storageClass">
-                                @for (sc of storageClasses | objectSort: 'key'; track sc) {
-                                    <mat-option [value]="sc['key']">{{ sc['value'] }}</mat-option>
+                        @if (isAws) {
+                            <mat-form-field color="accent">
+                                <mat-label>Storage class</mat-label>
+                                <mat-select formControlName="storageClass">
+                                    @for (sc of storageClasses | objectSort: 'key'; track sc) {
+                                        <mat-option [value]="sc['key']">{{ sc['value'] }}</mat-option>
+                                    }
+                                </mat-select>
+                                @if (transferProfileForm.controls['storageClass'].hasError('oneOf')) {
+                                    <mat-error>Invalid storage class</mat-error>
                                 }
-                            </mat-select>
-                            @if (transferProfileForm.controls['storageClass'].hasError('oneOf')) {
-                                <mat-error>Invalid storage class</mat-error>
-                            }
-                        </mat-form-field>
+                            </mat-form-field>
+                        } @else if (preset.supportsStorageClass) {
+                            <mat-form-field color="accent">
+                                <mat-label>Storage class</mat-label>
+                                <input matInput type="text" formControlName="storageClass" placeholder="standard">
+                                <mat-hint>Leave as <code>standard</code> unless your provider documents other classes.</mat-hint>
+                            </mat-form-field>
+                        }
 
                         <ng-container formGroupName="checksums">
                             <mat-form-field color="accent">
@@ -340,16 +504,18 @@
                             </mat-form-field>
                         </ng-container>
 
-                        <div class="form-field">
-                            <mat-slide-toggle formControlName="accelerated">Use S3 Transfer Acceleration</mat-slide-toggle>
-                            <div class="toggle-note">
-                                Additional fees apply. See
-                                <a href="" (click)="openExternalLink($event,'https://aws.amazon.com/s3/pricing/')">aws.amazon.com/s3/pricing</a>.
+                        @if (isAws) {
+                            <div class="form-field">
+                                <mat-slide-toggle formControlName="accelerated">Use S3 Transfer Acceleration</mat-slide-toggle>
+                                <div class="toggle-note">
+                                    Additional fees apply. See
+                                    <a href="" (click)="openExternalLink($event,'https://aws.amazon.com/s3/pricing/')">aws.amazon.com/s3/pricing</a>.
+                                </div>
+                                @if (transferProfileForm.controls['bucket'].hasError('acceleratedWithPeriods')) {
+                                    <mat-error>{{ errorMessages.transferProfileAccelerated.bucketWithPeriods }}</mat-error>
+                                }
                             </div>
-                            @if (transferProfileForm.controls['bucket'].hasError('acceleratedWithPeriods')) {
-                                <mat-error>{{ errorMessages.transferProfileAccelerated.bucketWithPeriods }}</mat-error>
-                            }
-                        </div>
+                        }
 
                         <div class="section-subhead">File selection &amp; ordering</div>
 

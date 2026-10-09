@@ -1,12 +1,18 @@
 import { COMMA, ENTER, SPACE } from '@angular/cdk/keycodes';
-import { FormControl, FormGroup, Validators } from '@angular/forms';
+import { FormControl, FormGroup, ValidatorFn, Validators } from '@angular/forms';
 import { fileOrderListValidator, noSpacesValidator, oneOfValidator } from '@app/classes';
+import { DEFAULT_PROVIDER, ProviderType } from '@app/constants/providers.constants';
 import {
     AuthMethodType,
     ChecksumAlgorithm,
     StorageClass,
     TransferProfileForm,
 } from '@containers/forms/transfer-profile-form/transfer-profile-form.interfaces';
+
+/** Storage class validators for Amazon S3: the value must be one of the known AWS classes. */
+export function awsStorageClassValidators(storageClasses: StorageClass[]): ValidatorFn[] {
+    return [Validators.required, oneOfValidator(storageClasses.map((item) => item.key))];
+}
 
 export const storageClasses: StorageClass[] = [
     {key: 'standard', value: 'Standard'},
@@ -72,8 +78,18 @@ export function createTransferProfileForm(
             validators: [Validators.required],
         }),
         profile: new FormControl<string>('', {nonNullable: true}),
+        // S3 provider
+        provider: new FormControl<ProviderType>(DEFAULT_PROVIDER, {nonNullable: true}),
+        pathStyle: new FormControl<boolean>(false, {nonNullable: true}),
         // authentication method
         authMethod: new FormControl<AuthMethodType>('aws-profile', {nonNullable: true}),
+        // static access keys
+        accessKeyId: new FormControl<string>('', {nonNullable: true}),
+        secretAccessKey: new FormControl<string>('', {nonNullable: true}),
+        sessionToken: new FormControl<string>('', {nonNullable: true}),
+        // endpoint TLS settings
+        tlsCaBundle: new FormControl<string>('', {nonNullable: true}),
+        tlsSkipVerify: new FormControl<boolean>(false, {nonNullable: true}),
         // OIDC settings
         oidcIssuerUrl: new FormControl<string>('', {nonNullable: true}),
         oidcClientId: new FormControl<string>('', {nonNullable: true}),
@@ -88,7 +104,7 @@ export function createTransferProfileForm(
             'standard',
             {
                 nonNullable: true,
-                validators: [Validators.required, oneOfValidator(storageClasses.map((item) => item.key))],
+                validators: awsStorageClassValidators(storageClasses),
             },
         ),
         checksums: new FormGroup({

@@ -101,10 +101,19 @@ func (s3m *S3Manager) RenameS3Object(oldObject string, newObject string) error {
 			headObject.StorageClass)
 	}
 
+	storageClass := headObject.StorageClass
+	if !s3m.Provider.IsAWS() {
+		// HeadObject can echo a class the provider does not accept on CopyObject; send what an upload would.
+		storageClass, err = s3m.storageClassFor(string(storageClass))
+		if err != nil {
+			return fmt.Errorf(strRenameStorageClassInvalid, pathToRename, headObject.StorageClass, ftErrors.ErrConvertStorageClass)
+		}
+	}
+
 	objectNewNameData := S3ObjectRenameData{
 		newName:      newPathName,
 		size:         headObject.ContentLength,
-		storageClass: headObject.StorageClass,
+		storageClass: storageClass,
 	}
 	err = s3m.PerformSingleObjectRename(pathToRename, objectNewNameData)
 	if err != nil {
@@ -156,12 +165,11 @@ func (s3m *S3Manager) RenameS3Prefix(oldPrefix string, newPrefix string) error {
 				ftErrors.ErrInvalidRenameStorageClassPrefix,
 				object.StorageClass)
 		}
-		awsStorageClass, err := convertToAWSStorageClass(object.StorageClass)
+		awsStorageClass, err := s3m.storageClassFor(object.StorageClass)
 		if err != nil {
 			events.Events.Error("Error renaming object %s with storage class %s for rename: %s", object.Key, object.StorageClass,
 				ftErrors.ErrConvertStorageClass.Error())
-			return fmt.Errorf("error renaming object %s with storage class %s for rename: %w", object.Key, object.StorageClass,
-				ftErrors.ErrConvertStorageClass)
+			return fmt.Errorf(strRenameStorageClassInvalid, object.Key, object.StorageClass, ftErrors.ErrConvertStorageClass)
 		}
 
 		objectsToRename[object.Key] = S3ObjectRenameData{

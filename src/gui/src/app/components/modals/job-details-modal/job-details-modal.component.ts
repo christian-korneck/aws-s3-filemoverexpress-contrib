@@ -31,6 +31,7 @@ import { TaskStatusPipe } from '@app/pipes/task-status.pipe';
 import { FormatBytesPipe } from '@app/pipes/format-bytes.pipe';
 import { TextEllipsesPipe } from '@app/pipes/text-ellipses.pipe';
 import { getOSFileBrowserName } from '@app/components/layout/file-browser/file-browser.utils';
+import { presetFor } from '@app/constants/providers.constants';
 import {
     checksumAlgorithms,
     storageClasses,
@@ -591,8 +592,10 @@ export class JobDetailsModalComponent implements AfterViewInit, OnDestroy {
                 this.s3Bucket = profile.bucket ?? '';
                 this.localSourcePath = profile.paths?.local ?? '';
                 this.remotePrefix = profile.paths?.remote ?? '';
-                this.storageClassLabel =
-                    storageClasses.find((sc) => sc.key === profile.storageClass)?.value ?? profile.storageClass ?? '';
+                // Providers without storage classes ignore the stored value, so don't show one.
+                this.storageClassLabel = presetFor(profile.provider).supportsStorageClass
+                    ? storageClasses.find((sc) => sc.key === profile.storageClass)?.value ?? profile.storageClass ?? ''
+                    : 'Provider default';
                 if (profile.checksums?.enabled && profile.checksums.algorithm && profile.checksums.algorithm !== 'none') {
                     const alg = checksumAlgorithms.find((a) => a.value === profile.checksums.algorithm)?.viewValue
                         ?? profile.checksums.algorithm;

@@ -3,7 +3,6 @@ package job_manager
 import (
 	"fmt"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -59,7 +58,7 @@ type (
 
 // GetS3Manager either returns the cached s3 manager, or it creates a new S3 manager, caches it and returns it.
 func (jm *JobManager) GetS3Manager(tp configtypes.TransferProfile) (*transferApi.S3Manager, error) {
-	key := strings.Join([]string{tp.Profile, tp.Bucket, tp.Region, tp.Endpoint}, "-")
+	key := tp.ConnectionKey()
 
 	jm.s3ManagerLock.RLock()
 	s3m, exists := jm.s3ManagerCache[key]
@@ -76,6 +75,14 @@ func (jm *JobManager) GetS3Manager(tp configtypes.TransferProfile) (*transferApi
 	jm.s3ManagerLock.Unlock()
 
 	return s3m, nil
+}
+
+// ClearS3ManagerCache drops every cached S3 manager so that the next request builds one from the current
+// configuration. Jobs that are already running keep the manager they hold.
+func (jm *JobManager) ClearS3ManagerCache() {
+	jm.s3ManagerLock.Lock()
+	jm.s3ManagerCache = make(map[string]*transferApi.S3Manager)
+	jm.s3ManagerLock.Unlock()
 }
 
 // GetInstance makes the JobManager a singleton struct. Only one job manager exists in the daemon.
@@ -241,7 +248,7 @@ func (jm *JobManager) DownloadJob(job *jobmanagertypes.Job) {
 			Id:        jobId,
 			Name:      job.Name(),
 			ErrorTime: time.Now(),
-			Err:       fmt.Errorf(strFailedEstablishingAwsSession, sessErr),
+			Err:       fmt.Errorf(strFailedEstablishingS3Session, sessErr),
 		})
 		time.Sleep(constants.SleepDuration)
 		return

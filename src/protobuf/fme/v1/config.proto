@@ -93,6 +93,41 @@ enum AuthMethod {
     AUTH_METHOD_UNSPECIFIED = 0;
     AUTH_METHOD_AWS_PROFILE = 1;
     AUTH_METHOD_OIDC = 2;
+    // Static access key ID / secret access key (optional session token) stored in the configuration file.
+    AUTH_METHOD_STATIC_KEYS = 3;
+}
+
+// Which S3 implementation a TransferProfile talks to. UNSPECIFIED is treated as AWS so that
+// configurations written before this field existed keep working unchanged.
+enum S3Provider {
+    S3_PROVIDER_UNSPECIFIED = 0;
+    S3_PROVIDER_AWS = 1;
+    S3_PROVIDER_MINIO = 2;
+    S3_PROVIDER_CLOUDFLARE_R2 = 3;
+    S3_PROVIDER_BACKBLAZE_B2 = 4;
+    S3_PROVIDER_WASABI = 5;
+    S3_PROVIDER_DIGITALOCEAN_SPACES = 6;
+    // Any other S3-compatible endpoint (Ceph RGW, Garage, SeaweedFS, ...).
+    S3_PROVIDER_OTHER = 7;
+    S3_PROVIDER_HETZNER = 8;
+}
+
+// Static credentials used when auth_method is AUTH_METHOD_STATIC_KEYS.
+// GetConfiguration never returns stored secrets: secret_access_key and session_token are sent as
+// "***REDACTED***" when a value is stored. A client that sends that placeholder back (SetConfiguration,
+// ValidateTransferProfile) keeps the stored value, as long as the profile name and access_key_id are unchanged.
+message StaticCredentials {
+    string access_key_id = 1;
+    string secret_access_key = 2;
+    string session_token = 3;
+}
+
+// TLS settings for the S3 endpoint connection.
+message EndpointTlsSettings {
+    // Path (on the daemon host) to a PEM bundle appended to the system trust store. Empty uses system roots only.
+    string ca_bundle = 1;
+    // Disables TLS certificate verification. Insecure; only for trusted lab networks.
+    bool skip_verify = 2;
 }
 
 message OIDCConfig {
@@ -124,6 +159,20 @@ message TransferProfile {
     string endpoint = 18;
     AuthMethod auth_method = 19;
     OIDCConfig oidc_config = 20;
+    S3Provider provider = 21;
+    // Use path-style addressing (https://endpoint/bucket/key) instead of virtual-hosted style.
+    bool path_style = 22;
+    StaticCredentials static_credentials = 23;
+    EndpointTlsSettings tls = 24;
+}
+
+message ValidateTransferProfileRequest {
+    TransferProfile transfer_profile = 1;
+}
+
+message ValidateTransferProfileResponse {
+    bool success = 1;
+    string message = 2;
 }
 
 message UploadHotFolderSettings {

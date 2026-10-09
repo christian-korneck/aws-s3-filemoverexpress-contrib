@@ -41,6 +41,7 @@ const sidebars = {
       type: 'category',
       label: 'Authentication & Integrations',
       items: [
+        {type: 'doc', id: 'S3-Compatible-Providers', label: 'S3-Compatible Providers'},
         {type: 'doc', id: 'OIDC-Authentication', label: 'OIDC / SSO'},
         {type: 'doc', id: 'MCP-Server', label: 'MCP Server'},
       ],

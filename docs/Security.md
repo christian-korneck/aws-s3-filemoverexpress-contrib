@@ -61,6 +61,14 @@ File Mover Express operates under AWS's shared responsibility model:
 - Never commit credentials to version control
 - Use temporary credentials for enhanced security
 
+**Provider Access Keys (S3-compatible providers):**
+- A Remote Configuration using the **Access keys** method stores the key ID and secret in `configuration.yaml` on the daemon machine, in plain text, with owner-only permissions on macOS and Linux (same posture as `~/.aws/credentials`)
+- The secret and session token are redacted from support files and never written to the logs
+- The daemon never sends a stored secret or session token to the GUI; the GUI only sends a new one when you type it, so remote daemons should still use TLS and a pre-shared key (see below)
+- **Test connection** makes the daemon connect to whatever endpoint, CA bundle path and credentials the GUI sends, and returns the error text. It is allowed for the same clients that may edit the configuration (local GUIs, or remote ones when `allowUIConfiguration` is enabled), so only enable that permission for clients you trust
+- Prefer provider keys scoped to a single bucket, and prefer a named profile or environment variables on the daemon host if you do not want keys in FME's configuration
+- Only enable **Skip TLS certificate verification** on trusted lab networks; add the provider's CA as a **Custom CA bundle** instead
+
 **Configuration Security:**
 ```bash
 # Set appropriate file permissions

@@ -16,11 +16,20 @@ Before you can transfer files with File Mover Express, you must add a remote con
 
 2. Enter the following information in the "Add Remote Configuration" section and choose **Add**:
 
-   **Basic Settings:**
+   **Connection:**
+   - **Storage provider**: Amazon S3, or an S3-compatible service (MinIO, Cloudflare R2, Backblaze B2, Wasabi, DigitalOcean Spaces, Hetzner Object Storage, or any other S3 API). Choosing a provider prefills its endpoint pattern, region default and addressing style. See [S3-Compatible Providers](S3-Compatible-Providers.md).
    - **Remote Configuration name**: A name for your Remote Configuration. This can be anything, but cannot be changed later.
-   - **S3 Bucket**: The name of the S3 bucket that you want to upload to and download from.
-   - **AWS Region**: The AWS Region that your S3 bucket is located in.
-   - **AWS named profile**: An AWS named profile to use for S3 access. If you choose to use an AWS Access Key or Secret Key instead, you can leave this field blank.
+   - **S3 Bucket**: The name of the bucket that you want to upload to and download from.
+   - **Region**: For Amazon S3, the AWS Region that your bucket is located in. For other providers, the signing region they document (for example `auto` for Cloudflare R2, or `us-east-1` for MinIO).
+   - **Endpoint URL**: Required for non-Amazon providers; the full `https://` URL of the provider's S3 API. For Amazon S3 the field is optional and holds an S3 Access Point or VPC endpoint.
+   - **Use path-style addressing** (non-Amazon providers): sends requests as `endpoint/bucket/key`. Needed by most self-hosted stores.
+   - **Custom CA bundle** / **Skip TLS certificate verification**: for endpoints with private or self-signed certificates.
+   - **Test connection**: lists the bucket with the values currently in the form, before you save.
+
+   **Authentication:**
+   - **AWS named profile** / **Shared credentials profile**: A profile from `~/.aws/credentials` on the machine running the daemon.
+   - **Access keys**: An access key ID and secret access key issued by your provider, stored in the configuration file on the daemon machine.
+   - **OIDC / SSO**: Sign in through your identity provider to obtain temporary AWS credentials. Amazon S3 only. See [OIDC / SSO Authentication](OIDC-Authentication.md).
 
 3. Configure the following **Advanced** settings:
 
@@ -36,11 +45,10 @@ Before you can transfer files with File Mover Express, you must add a remote con
    - **File order list** (optional): Type a file extension and press Enter to define transfer priority. Extensions not listed are transferred last.
 
    **Network and Performance:**
-   - **S3 Access Point/VPC Endpoint**: The address of your endpoint (e.g., `vpce-1a2b3c4d-5e6f.s3.us-east-1.vpce.amazonaws.com`)
    - **Transfer autotuning**: Enabled by default, dynamically sets number of threads and chunk size. We recommend keeping it enabled.
      - **Number of threads**: Number of individual threads used to transfer each file
      - **Chunk size**: Size of the chunk (in megabytes) delivered by each thread
-   - **Use S3 Transfer Acceleration**: When enabled, transfers will use S3 Transfer Acceleration
+   - **Use S3 Transfer Acceleration** (Amazon S3 only): When enabled, transfers will use S3 Transfer Acceleration
    - **Enable metadata filter**: When enabled, automatically filters system metadata files (files starting with `._`, `thumbs.db`, `.DS_Store`)
 
 4. Choose **Save**.
@@ -85,8 +93,23 @@ If you aren't using an OS with a desktop, you can configure File Mover Express u
 #### Required Parameters
 
 - **bucket**: S3 bucket name for uploads and downloads
-- **region**: AWS Region where your bucket is located
-- **profile**: AWS named profile for S3 access
+- **region**: AWS Region where your bucket is located (for other providers, their documented signing region; defaults per provider when omitted)
+- **profile**: Named profile from `~/.aws/credentials` for S3 access (not needed with `authMethod: 3`)
+
+#### Provider and Authentication Parameters
+
+- **provider**: `aws` (default when omitted), `minio`, `cloudflare-r2`, `backblaze-b2`, `wasabi`, `digitalocean-spaces`, `hetzner` or `other`
+- **endpoint**: Full URL of the S3 API. Required for every provider except Amazon S3, where it optionally holds an Access Point or VPC endpoint
+- **pathStyle**: `true` to send requests as `endpoint/bucket/key` (most self-hosted stores); ignored for Amazon S3
+- **authMethod**: `1` named profile (default), `2` OIDC / SSO (Amazon S3 only, see [OIDC / SSO Authentication](OIDC-Authentication.md)), `3` access keys
+- **staticCredentials**: with `authMethod: 3`
+  - **accessKeyId**, **secretAccessKey**: the key pair issued by your provider
+  - **sessionToken**: optional, for temporary credentials
+- **tls**:
+  - **caBundle**: PEM file on the daemon machine for private CAs
+  - **skipVerify**: disables certificate verification (insecure)
+
+Worked examples for each provider are in [S3-Compatible Providers](S3-Compatible-Providers.md).
 
 #### Optional Parameters
 
@@ -108,7 +131,7 @@ If you aren't using an OS with a desktop, you can configure File Mover Express u
 - **enableMetadataFilter**: Filter system metadata files (default: `false`)
 
 **Network Settings:**
-- **accelerated**: Use S3 Transfer Acceleration (default: `false`)
+- **accelerated**: Use S3 Transfer Acceleration (default: `false`; Amazon S3 only)
 
 **Path Settings:**
 - **paths**:
@@ -293,8 +316,8 @@ filemoverexpress validate-credentials [remote-configuration-name]
 ```
 
 This command:
-- Checks your AWS credentials
-- Verifies File Mover Express can connect to Amazon S3
+- Resolves the credentials for the Remote Configuration (named profile, access keys or OIDC session)
+- Verifies File Mover Express can connect to the configured S3 endpoint (Amazon S3 or an S3-compatible provider)
 - Lists objects in the specified bucket
 
 ## Configuration File Location

@@ -25,6 +25,9 @@ import (
 	"github.com/awslabs/filemoverexpress/utils/systeminfo"
 )
 
+// configFileMode keeps the configuration file readable by its owner only.
+const configFileMode os.FileMode = 0600
+
 var (
 	configFile, configDir string
 	cachedCfg             atomic.Value // configtypes.FmeConfig
@@ -177,8 +180,13 @@ func marshalConfigToFile(cfg configtypes.FmeConfig, filePath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
-	if err := os.WriteFile(filePath, data, 0600); err != nil {
+	if err := os.WriteFile(filePath, data, configFileMode); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
+	}
+	// WriteFile only applies the mode when it creates the file; tighten an existing file too, because it
+	// can now hold access keys. Has no effect on Windows.
+	if err := os.Chmod(filePath, configFileMode); err != nil {
+		return fmt.Errorf(strFailedRestrictingFileMode, err)
 	}
 	return nil
 }
@@ -299,8 +307,18 @@ func validateTransferProfiles(cfg *configtypes.FmeConfig) bool {
 	for txProfileName := range maps.Keys(cfg.Protocols.S3.TransferProfiles) {
 		txp := cfg.Protocols.S3.TransferProfiles[txProfileName]
 
+		if !txp.Provider.IsKnown() {
+			logger.Warn(strUnknownProviderValue, txProfileName, txp.Provider)
+			events.Events.Warn(strUnknownProviderValue, txProfileName, txp.Provider)
+		}
+
+		if txp.PathStyle && txp.Provider.IsAWS() {
+			logger.Warn(strPathStyleIgnoredForAWS, txProfileName)
+			events.Events.Warn(strPathStyleIgnoredForAWS, txProfileName)
+		}
+
 		if txp.Region == "" {
-			txp.Region = "us-east-2"
+			txp.Region = txp.Provider.Spec().DefaultRegion
 			changesRequired = true
 		}
 

@@ -31,7 +31,7 @@ func (*FileMoverServer) S3ListPrefix(
 	s3m, err := transferapi.NewS3Manager(transferProfile)
 	if err != nil {
 		events.Events.Error(
-			"Failed to establish AWS session for profile %q: %s",
+			strFailedEstablishingProfileSession,
 			transferProfile.Name,
 			err.Error(),
 		)
@@ -41,7 +41,7 @@ func (*FileMoverServer) S3ListPrefix(
 				fmt.Errorf("sign in required for profile %q", transferProfile.Name),
 			)
 		}
-		return nil, fmt.Errorf(strFailedEstablishingAwsSession, err)
+		return nil, fmt.Errorf(strFailedEstablishingS3Session, err)
 	}
 
 	prefix := utils.CleanPrefix("/", req.Msg.Prefix)

@@ -296,3 +296,41 @@ func TestFetchDiscovery_InvalidCABundleContent(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no valid PEM certificates")
 }
+
+func TestLoadCABundlePool(t *testing.T) {
+	t.Run("adds the bundle to the system pool", func(t *testing.T) {
+		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		template := &x509.Certificate{
+			SerialNumber: big.NewInt(1),
+			Subject:      pkix.Name{CommonName: "fme-test-ca"},
+			NotBefore:    time.Now().Add(-time.Hour),
+			NotAfter:     time.Now().Add(time.Hour),
+			IsCA:         true,
+			KeyUsage:     x509.KeyUsageCertSign,
+		}
+		der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+		require.NoError(t, err)
+		caFile := filepath.Join(t.TempDir(), "ca.pem")
+		require.NoError(t, os.WriteFile(caFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600))
+
+		pool, err := LoadCABundlePool(caFile)
+		require.NoError(t, err)
+		cert, err := x509.ParseCertificate(der)
+		require.NoError(t, err)
+		_, err = cert.Verify(x509.VerifyOptions{Roots: pool})
+		assert.NoError(t, err, "the bundle certificate should be trusted by the returned pool")
+	})
+
+	t.Run("missing file", func(t *testing.T) {
+		_, err := LoadCABundlePool(filepath.Join(t.TempDir(), "missing.pem"))
+		assert.Error(t, err)
+	})
+
+	t.Run("file without certificates", func(t *testing.T) {
+		caFile := filepath.Join(t.TempDir(), "empty.pem")
+		require.NoError(t, os.WriteFile(caFile, []byte("not a certificate"), 0o600))
+		_, err := LoadCABundlePool(caFile)
+		assert.ErrorContains(t, err, "no valid PEM certificates")
+	})
+}

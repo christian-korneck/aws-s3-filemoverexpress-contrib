@@ -21,6 +21,7 @@ File Mover Express is a high-performance file transfer application designed to a
 - **Checksumming & MHL Support**: Optional file integrity verification, with XXH3 being the fastest option. XXHash, XXHash64 and MD5 are available for workflows that require them. Reads MHL files for camera-to-cloud verification workflows.
 - **Cross-Platform**: Works on macOS, Windows, and Linux
 - **Multi-Region**: Works with any AWS region where S3 is available
+- **S3-Compatible Storage**: Point a Remote Configuration at MinIO, Cloudflare R2, Backblaze B2, Wasabi, DigitalOcean Spaces, Hetzner Object Storage, or any other S3 API, with access-key authentication, custom endpoints, path-style addressing and private-CA support. See [S3-Compatible Providers](docs/S3-Compatible-Providers.md)
 
 ## Screenshots
 

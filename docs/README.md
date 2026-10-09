@@ -18,6 +18,7 @@ The documentation has been organized into the following pages:
 - **[Using the GUI](Using-the-GUI.md)** - Comprehensive GUI usage guide
 - **[Using the CLI](Using-the-CLI.md)** - Command-line interface and scripting
 - **[OIDC / SSO Authentication](OIDC-Authentication.md)** - Sign in with an identity provider for temporary AWS credentials
+- **[S3-Compatible Providers](S3-Compatible-Providers.md)** - Use MinIO, Cloudflare R2, Backblaze B2, Wasabi and other S3-compatible storage
 - **[Hot Folders](Hot-Folders.md)** - Automated file monitoring and uploads
 - **[Checksums](Checksums.md)** - File integrity verification
 

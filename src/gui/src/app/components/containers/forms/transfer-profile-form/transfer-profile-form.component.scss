@@ -234,9 +234,56 @@ a {
     font-size: 11px;
     color: var(--mat-sys-on-surface-variant, #93a4bd);
     margin: 4px 0 0 4px;
+
+    // Must out-rank the plain .toggle-note color above.
+    &.warning-hint {
+        color: variables.$yellow-700;
+    }
+
+    .warning-icon {
+        font-size: 14px;
+        width: 14px;
+        height: 14px;
+        vertical-align: text-bottom;
+    }
+}
+
+.endpoint-warning {
+    margin-top: -8px;
 }
 
 /* The tab body owns vertical rhythm via flex gap, so drop the default field margin. */
 .tab-body mat-form-field {
     margin-bottom: 0;
+}
+
+/* "Test connection" row at the bottom of the Connection tab. */
+.test-connection {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 4px;
+
+    .test-connection-result {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .test-connection-message {
+        font-size: 12px;
+        color: var(--mat-sys-on-surface-variant, #93a4bd);
+    }
+
+    .test-connection-ok {
+        color: var(--mat-sys-primary);
+    }
+
+    .test-connection-error {
+        color: var(--mat-sys-error);
+    }
+}
+
+.clear-session-token {
+    margin-top: -8px;
 }

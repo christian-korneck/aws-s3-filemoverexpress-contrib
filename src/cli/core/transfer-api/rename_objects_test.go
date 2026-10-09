@@ -8,6 +8,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
+
+	"github.com/awslabs/filemoverexpress/types/configtypes"
 )
 
 // renameCapturingClient implements FileMoverS3ClientInterface for rename tests. It
@@ -21,6 +24,8 @@ type renameCapturingClient struct {
 	FileMoverS3ClientInterface
 
 	objects           []s3types.Object
+	heads             map[string]*s3.HeadObjectOutput
+	copyStorageClass  []s3types.StorageClass
 	copySources       []string
 	copyDestKeys      []string
 	listedVersionKeys []string
@@ -40,8 +45,17 @@ func (c *renameCapturingClient) ListObjectsV2(_ context.Context, params *s3.List
 func (c *renameCapturingClient) CopyObject(_ context.Context, params *s3.CopyObjectInput,
 	_ ...func(*s3.Options)) (*s3.CopyObjectOutput, error) {
 	c.copySources = append(c.copySources, aws.ToString(params.CopySource))
+	c.copyStorageClass = append(c.copyStorageClass, params.StorageClass)
 	c.copyDestKeys = append(c.copyDestKeys, aws.ToString(params.Key))
 	return &s3.CopyObjectOutput{}, nil
+}
+
+func (c *renameCapturingClient) HeadObject(_ context.Context, params *s3.HeadObjectInput,
+	_ ...func(*s3.Options)) (*s3.HeadObjectOutput, error) {
+	if head, ok := c.heads[aws.ToString(params.Key)]; ok {
+		return head, nil
+	}
+	return nil, &smithy.GenericAPIError{Code: "NotFound"}
 }
 
 func (c *renameCapturingClient) ListObjectVersions(_ context.Context, params *s3.ListObjectVersionsInput,
@@ -124,4 +138,30 @@ func assertContains(t *testing.T, label string, haystack []string, needle string
 		}
 	}
 	t.Errorf("expected %s %q to be present, got %v", label, needle, haystack)
+}
+
+func TestRenameS3Object_StorageClassPerProvider(t *testing.T) {
+	tests := []struct {
+		provider configtypes.S3Provider
+		want     s3types.StorageClass
+	}{
+		{provider: configtypes.S3ProviderAWS, want: s3types.StorageClassStandardIa},
+		{provider: configtypes.S3ProviderWasabi, want: ""},
+		{provider: configtypes.S3ProviderMinIO, want: s3types.StorageClassStandardIa},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.provider), func(t *testing.T) {
+			client := &renameCapturingClient{heads: map[string]*s3.HeadObjectOutput{
+				"media/old.mov": {ContentLength: aws.Int64(10), StorageClass: s3types.StorageClassStandardIa},
+			}}
+			s3m := &S3Manager{Bucket: "bucket", Client: client, Lock: &sync.RWMutex{}, Provider: tt.provider}
+
+			if err := s3m.RenameS3Object("media/old.mov", "media/new.mov"); err != nil {
+				t.Fatalf("RenameS3Object() error = %v", err)
+			}
+			if len(client.copyStorageClass) != 1 || client.copyStorageClass[0] != tt.want {
+				t.Errorf("CopyObject StorageClass = %v, want [%q]", client.copyStorageClass, tt.want)
+			}
+		})
+	}
 }

@@ -25,7 +25,8 @@ func Create() (outputFile string, outputDir string, err error) {
 	supportFileMap["memory.yaml"] = GetMemoryInformation()
 	supportFileMap["mounts.yaml"] = mounts
 	supportFileMap["mount_usages.yaml"] = GetMountPointUsage(mounts)
-	supportFileMap[constants.ConfigFullName] = config.LoadConfiguration()
+	// Redacted so that static access keys never leave the daemon host inside a support bundle.
+	supportFileMap[constants.ConfigFullName] = config.LoadConfiguration().Redacted()
 	supportFileMap["limits.yaml"] = GetLimits()
 
 	for filename, input := range supportFileMap {

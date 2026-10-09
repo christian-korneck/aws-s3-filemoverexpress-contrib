@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/awslabs/filemoverexpress/logger"
@@ -77,19 +78,19 @@ func (s3m *S3Manager) ListObjectsAndFolders(prefix string, delimiter string) (Li
 		}
 		for _, object := range s3Output.Contents {
 			// don't add the object if it has the same path as the enclosing folder to avoid listing 0 bytes "/" objects
-			if prefix != *object.Key {
+			if prefix != aws.ToString(object.Key) {
 				s3Object := S3Object{
-					Key:          *object.Key,
+					Key:          aws.ToString(object.Key),
 					LastModified: object.LastModified,
 					Metadata:     nil,
-					Size:         *object.Size,
+					Size:         aws.ToInt64(object.Size),
 					StorageClass: string(object.StorageClass),
 				}
 				output.S3Objects = append(output.S3Objects, s3Object)
 			}
 		}
 		for _, folder := range s3Output.CommonPrefixes {
-			output.S3Folders = append(output.S3Folders, *folder.Prefix)
+			output.S3Folders = append(output.S3Folders, aws.ToString(folder.Prefix))
 		}
 	}
 	return output, nil
@@ -111,10 +112,10 @@ func (s3m *S3Manager) ListObjects(prefix string) (ListObjectsOutput, error) {
 		}
 		for _, object := range s3Output.Contents {
 			s3Object := S3Object{
-				Key:          *object.Key,
+				Key:          aws.ToString(object.Key),
 				LastModified: object.LastModified,
 				Metadata:     nil,
-				Size:         *object.Size,
+				Size:         aws.ToInt64(object.Size),
 				StorageClass: string(object.StorageClass),
 			}
 			output.S3Objects = append(output.S3Objects, s3Object)
@@ -159,14 +160,14 @@ func (s3m *S3Manager) ListVersionsInPrefix(prefix string) (ListObjectVersionsOut
 		}
 		for _, version := range s3Output.Versions {
 			objectVersion := S3ObjectVersion{
-				Key:            *version.Key,
+				Key:            aws.ToString(version.Key),
 				LastModified:   version.LastModified,
-				Size:           *version.Size,
-				VersionId:      *version.VersionId,
-				IsLatest:       *version.IsLatest,
+				Size:           aws.ToInt64(version.Size),
+				VersionId:      aws.ToString(version.VersionId),
+				IsLatest:       aws.ToBool(version.IsLatest),
 				IsDeleteMarker: false,
 			}
-			if *version.IsLatest {
+			if objectVersion.IsLatest {
 				numLatestObjectVersions++
 			}
 			numObjectVersions++
@@ -174,10 +175,10 @@ func (s3m *S3Manager) ListVersionsInPrefix(prefix string) (ListObjectVersionsOut
 		}
 		for _, version := range s3Output.DeleteMarkers {
 			deleteMarker := S3ObjectVersion{
-				Key:            *version.Key,
+				Key:            aws.ToString(version.Key),
 				LastModified:   version.LastModified,
-				VersionId:      *version.VersionId,
-				IsLatest:       *version.IsLatest,
+				VersionId:      aws.ToString(version.VersionId),
+				IsLatest:       aws.ToBool(version.IsLatest),
 				IsDeleteMarker: true,
 			}
 			numDeleteMarkers++
@@ -187,6 +188,38 @@ func (s3m *S3Manager) ListVersionsInPrefix(prefix string) (ListObjectVersionsOut
 
 	logger.Info("Found %d latest object version(s) out of %d total object version(s) and %d delete marker(s) in %s",
 		numLatestObjectVersions, numObjectVersions, numDeleteMarkers, inputPrefix)
+
+	return listOutput, nil
+}
+
+// listUnversioned lists the current objects under a prefix (or exactly one key) as single "versions" without
+// a VersionId. It is the deletion listing for providers that do not implement ListObjectVersions.
+func (s3m *S3Manager) listUnversioned(path string, scope deleteScope) (ListObjectVersionsOutput, error) {
+	var listOutput ListObjectVersionsOutput
+	exactKey := scope == deleteScopeExactKey
+	prefix := FormatAsS3Prefix(path)
+	if exactKey {
+		// Same key handling as ListVersionsForObject: keep a trailing slash so folder markers match.
+		prefix = strings.TrimPrefix(path, "/")
+	}
+
+	objects, err := s3m.ListObjects(prefix)
+	if err != nil {
+		return listOutput, err
+	}
+	for _, object := range objects.S3Objects {
+		if exactKey && object.Key != prefix {
+			continue
+		}
+		listOutput.S3ObjectVersions = append(listOutput.S3ObjectVersions, S3ObjectVersion{
+			Key:          object.Key,
+			LastModified: object.LastModified,
+			Size:         object.Size,
+			IsLatest:     true,
+		})
+	}
+
+	logger.Info(strFoundUnversionedObjects, len(listOutput.S3ObjectVersions), prefix)
 
 	return listOutput, nil
 }
@@ -214,16 +247,16 @@ func (s3m *S3Manager) ListVersionsForObject(objKey string) (ListObjectVersionsOu
 			return listOutput, paginationErr
 		}
 		for _, version := range s3Output.Versions {
-			if *version.Key == inputPrefix {
+			if aws.ToString(version.Key) == inputPrefix {
 				objectVersion := S3ObjectVersion{
-					Key:            *version.Key,
+					Key:            aws.ToString(version.Key),
 					LastModified:   version.LastModified,
-					Size:           *version.Size,
-					VersionId:      *version.VersionId,
-					IsLatest:       *version.IsLatest,
+					Size:           aws.ToInt64(version.Size),
+					VersionId:      aws.ToString(version.VersionId),
+					IsLatest:       aws.ToBool(version.IsLatest),
 					IsDeleteMarker: false,
 				}
-				if *version.IsLatest {
+				if objectVersion.IsLatest {
 					numLatestObjectVersions++
 				}
 				numObjectVersions++
@@ -231,12 +264,12 @@ func (s3m *S3Manager) ListVersionsForObject(objKey string) (ListObjectVersionsOu
 			}
 		}
 		for _, version := range s3Output.DeleteMarkers {
-			if *version.Key == inputPrefix {
+			if aws.ToString(version.Key) == inputPrefix {
 				deleteMarker := S3ObjectVersion{
-					Key:            *version.Key,
+					Key:            aws.ToString(version.Key),
 					LastModified:   version.LastModified,
-					VersionId:      *version.VersionId,
-					IsLatest:       *version.IsLatest,
+					VersionId:      aws.ToString(version.VersionId),
+					IsLatest:       aws.ToBool(version.IsLatest),
 					IsDeleteMarker: true,
 				}
 				numDeleteMarkers++

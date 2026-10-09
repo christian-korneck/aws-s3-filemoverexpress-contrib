@@ -92,6 +92,8 @@ import { initialTestState } from '@state/test.state';
 import { StreamingClientError, StreamingClientErrorType, FmeConfig } from '@app/classes';
 import { ConnectionState } from '@state/models/connection-state-model';
 import { ShutdownResult } from '@gen/es/fme/v1/shared_pb';
+import { TransferProfileSchema } from '@gen/es/fme/v1/config_pb';
+import { create } from '@bufbuild/protobuf';
 import { Bookmark } from '../bookmarks/bookmarks.classes';
 import { BehaviorSubject } from 'rxjs';
 
@@ -213,6 +215,11 @@ describe('FmeClientService', () => {
             await expect(firstValueFrom(service.generateSupportFile())).rejects.toBeInstanceOf(StreamingClientError);
         });
 
+        it('validateTransferProfile errors StreamingClientNull', async () => {
+            const result = firstValueFrom(service.validateTransferProfile(create(TransferProfileSchema)));
+            await expect(result).rejects.toBeInstanceOf(StreamingClientError);
+        });
+
         it('createS3Prefix errors "Not connected" (state gate, not client gate)', async () => {
             await expect(firstValueFrom(service.createS3Prefix('k/', 'profile'))).rejects.toBe('Not connected');
         });
@@ -276,6 +283,22 @@ describe('FmeClientService', () => {
             const res = await firstValueFrom(service.setConfiguration(cfg));
             expect(res).toEqual({success: true});
             expect(cfg.toProtobuf).toHaveBeenCalled();
+        });
+
+        it('validateTransferProfile sends the profile and returns the daemon verdict', async () => {
+            const fn = unarySuccess('validateTransferProfile', {success: false, message: 'SignatureDoesNotMatch'});
+            const profile = create(TransferProfileSchema);
+            profile.bucket = 'media';
+            profile.endpoint = 'http://nas.local:9000';
+            const res = await firstValueFrom(service.validateTransferProfile(profile));
+            expect(res).toEqual({success: false, message: 'SignatureDoesNotMatch'});
+            expect(fn.mock.calls[0][0].transferProfile.bucket).toBe('media');
+            expect(fn.mock.calls[0][0].transferProfile.endpoint).toBe('http://nas.local:9000');
+        });
+
+        it('validateTransferProfile propagates transport errors', async () => {
+            unaryFailure('validateTransferProfile', new Error('daemon unreachable'));
+            await expect(firstValueFrom(service.validateTransferProfile(create(TransferProfileSchema)))).rejects.toThrow('daemon unreachable');
         });
 
         it('listJobs maps protobuf jobs to Job instances', async () => {

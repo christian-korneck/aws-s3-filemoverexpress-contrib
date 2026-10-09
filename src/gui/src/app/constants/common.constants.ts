@@ -66,7 +66,16 @@ export const formErrorMessages = {
         required: 'S3 bucket is required.',
     },
     transferProfileRegion: {
-        required: 'AWS Region is required.',
+        required: 'Region is required.',
+    },
+    transferProfileEndpoint: {
+        required: 'Endpoint URL is required for this provider.',
+        invalidEndpoint: 'Enter a full URL starting with http:// or https://, with every {placeholder} replaced.',
+    },
+    transferProfileStaticKeys: {
+        accessKeyIdRequired: 'Access key ID is required.',
+        secretRequired: 'Secret access key is required.',
+        secretReenter: 'Enter the secret access key for the new access key ID.',
     },
     transferProfilePrefix: {
         prefixIsURI: 'Remove leading <code>s3://</code> and S3 bucket name.',

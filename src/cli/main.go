@@ -13,6 +13,7 @@ import (
 	"github.com/awslabs/filemoverexpress/config"
 	"github.com/awslabs/filemoverexpress/constants"
 	"github.com/awslabs/filemoverexpress/core"
+	"github.com/awslabs/filemoverexpress/core/job_manager"
 	transferapi "github.com/awslabs/filemoverexpress/core/transfer-api"
 	"github.com/awslabs/filemoverexpress/core/upload/hot_folder"
 	"github.com/awslabs/filemoverexpress/events"
@@ -116,6 +117,9 @@ func ReloadConfigUpdates(cfg configtypes.FmeConfig) {
 	events.Events.Send(&configUpdateEvent)
 
 	transferapi.SetTargetBPS(int64(cfg.General.TargetBandwidth) * constants.MiB)
+	// Credentials, endpoints or CA bundles may have changed; rebuild S3 clients on next use.
+	transferapi.ResetEndpointHTTPClients()
+	job_manager.GetInstance().ClearS3ManagerCache()
 	hotFolders := cfg.UploadHotFolders
 
 	hot_folder.RemoveOldHotFolders()

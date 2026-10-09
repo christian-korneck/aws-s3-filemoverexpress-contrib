@@ -20,6 +20,8 @@ const (
 	AuthMethodAWSProfile AuthMethod = 1
 	// AuthMethodOIDC uses OIDC → AssumeRoleWithWebIdentity for credential acquisition.
 	AuthMethodOIDC AuthMethod = 2
+	// AuthMethodStaticKeys uses an access key ID / secret access key stored in the configuration file.
+	AuthMethodStaticKeys AuthMethod = 3
 )
 
 // When updating the tag values, make sure to make the corresponding updates for the constants in config/config/config-keys.go
@@ -105,6 +107,21 @@ type (
 
 		AuthMethod AuthMethod  `koanf:"authMethod" yaml:"authMethod"`
 		OIDCConfig *OIDCConfig `koanf:"oidcConfig" yaml:"oidcConfig"`
+
+		// Provider selects the S3 implementation; empty means Amazon S3 (see providers.go).
+		Provider          S3Provider          `koanf:"provider" yaml:"provider,omitempty"`
+		PathStyle         bool                `koanf:"pathStyle" yaml:"pathStyle,omitempty"`
+		StaticCredentials *StaticCredentials  `koanf:"staticCredentials" yaml:"staticCredentials,omitempty"`
+		TLS               EndpointTLSSettings `koanf:"tls" yaml:"tls,omitempty"`
+	}
+	StaticCredentials struct {
+		AccessKeyID     string `koanf:"accessKeyId" yaml:"accessKeyId"`
+		SecretAccessKey string `koanf:"secretAccessKey" yaml:"secretAccessKey"`
+		SessionToken    string `koanf:"sessionToken" yaml:"sessionToken,omitempty"`
+	}
+	EndpointTLSSettings struct {
+		CABundle   string `koanf:"caBundle" yaml:"caBundle"`
+		SkipVerify bool   `koanf:"skipVerify" yaml:"skipVerify"`
 	}
 	ChecksumSettings struct {
 		Enabled   bool                        `koanf:"enabled" yaml:"enabled"`
@@ -160,6 +177,21 @@ func (fmeConfig FmeConfig) GetTransferProfile(profileName string) (TransferProfi
 	}
 
 	return TransferProfile{}, errors.New(strNoSuchTransferProfile + profileName)
+}
+
+// Redacted returns a copy of the configuration with secret values replaced by a placeholder. Use it
+// for anything that leaves the daemon host, such as support files.
+func (fmeConfig FmeConfig) Redacted() FmeConfig {
+	out := fmeConfig
+	if out.APIServer.RemoteSettings.PreSharedKey != "" {
+		out.APIServer.RemoteSettings.PreSharedKey = RedactedSecret
+	}
+	out.Protocols.S3.TransferProfiles = make(map[string]TransferProfile, len(fmeConfig.Protocols.S3.TransferProfiles))
+	for name, transferProfile := range fmeConfig.Protocols.S3.TransferProfiles {
+		transferProfile.StaticCredentials = transferProfile.StaticCredentials.Redacted()
+		out.Protocols.S3.TransferProfiles[name] = transferProfile
+	}
+	return out
 }
 
 func (fmeConfig FmeConfig) ToGRPCProtobuf() *fmev1.GRPCFmeConfig {
@@ -257,102 +289,171 @@ func TransferProfilesFromProtobuf(profileList map[string]*fmev1.TransferProfile)
 	transferProfiles = make(map[string]TransferProfile)
 
 	for name, transferProfile := range profileList {
-		vdr := TransferProfile{
-			Name:                 transferProfile.Name,
-			Bucket:               transferProfile.Bucket,
-			Region:               transferProfile.Region,
-			Profile:              transferProfile.Profile,
-			Endpoint:             transferProfile.Endpoint,
-			Accelerated:          transferProfile.Accelerated,
-			FileOrder:            transferProfile.FileOrder,
-			EnableMetadataFilter: transferProfile.EnableMetadataFilter,
-			StorageClass:         transferProfile.StorageClass,
-			Paths: PathsSettings{
-				Local:  transferProfile.Paths.Local,
-				Remote: transferProfile.Paths.Remote,
-			},
-			AutoTuning: transferProfile.AutoTuning,
-			Checksums: ChecksumSettings{
-				Enabled:   transferProfile.Checksums.Enabled,
-				Algorithm: constants.ChecksumAlgorithm(transferProfile.Checksums.Algorithm),
-			},
-			ChunkSize:  transferProfile.ChunkSize,
-			Filter:     transferProfile.Filter,
-			Threads:    int(transferProfile.Threads),
-			MaxAge:     transferProfile.MaxAge,
-			AuthMethod: AuthMethod(transferProfile.AuthMethod),
-		}
-
-		if transferProfile.OidcConfig != nil {
-			vdr.OIDCConfig = &OIDCConfig{
-				IssuerURL:              transferProfile.OidcConfig.IssuerUrl,
-				ClientID:               transferProfile.OidcConfig.ClientId,
-				RoleARN:                transferProfile.OidcConfig.RoleArn,
-				Scopes:                 transferProfile.OidcConfig.Scopes,
-				PersistSession:         transferProfile.OidcConfig.PersistSession,
-				CustomCABundle:         transferProfile.OidcConfig.CustomCaBundle,
-				SessionDurationSeconds: transferProfile.OidcConfig.SessionDurationSeconds,
-			}
-		}
-
-		transferProfiles[name] = vdr
+		transferProfiles[name] = TransferProfileFromProtobuf(transferProfile)
 	}
 
 	return transferProfiles
+}
+
+// TransferProfileFromProtobuf converts a single wire profile. Nested messages can be nil when the
+// message comes straight from a client, so every sub-message is guarded.
+func TransferProfileFromProtobuf(transferProfile *fmev1.TransferProfile) TransferProfile {
+	if transferProfile == nil {
+		return TransferProfile{}
+	}
+
+	return TransferProfile{
+		Name:                 transferProfile.Name,
+		Bucket:               transferProfile.Bucket,
+		Region:               transferProfile.Region,
+		Profile:              transferProfile.Profile,
+		Endpoint:             transferProfile.Endpoint,
+		Accelerated:          transferProfile.Accelerated,
+		FileOrder:            transferProfile.FileOrder,
+		EnableMetadataFilter: transferProfile.EnableMetadataFilter,
+		StorageClass:         transferProfile.StorageClass,
+		Paths:                pathsFromProtobuf(transferProfile.Paths),
+		AutoTuning:           transferProfile.AutoTuning,
+		Checksums:            checksumsFromProtobuf(transferProfile.Checksums),
+		ChunkSize:            transferProfile.ChunkSize,
+		Filter:               transferProfile.Filter,
+		Threads:              int(transferProfile.Threads),
+		MaxAge:               transferProfile.MaxAge,
+		AuthMethod:           AuthMethod(transferProfile.AuthMethod),
+		OIDCConfig:           oidcConfigFromProtobuf(transferProfile.OidcConfig),
+		Provider:             S3ProviderFromProtobuf(transferProfile.Provider),
+		PathStyle:            transferProfile.PathStyle,
+		StaticCredentials:    staticCredentialsFromProtobuf(transferProfile.AuthMethod, transferProfile.StaticCredentials),
+		TLS:                  tlsFromProtobuf(transferProfile.Tls),
+	}
+}
+
+func pathsFromProtobuf(paths *fmev1.PathsSettings) PathsSettings {
+	if paths == nil {
+		return PathsSettings{}
+	}
+	return PathsSettings{Local: paths.Local, Remote: paths.Remote}
+}
+
+func checksumsFromProtobuf(checksums *fmev1.ChecksumSettings) ChecksumSettings {
+	if checksums == nil {
+		return ChecksumSettings{}
+	}
+	return ChecksumSettings{Enabled: checksums.Enabled, Algorithm: constants.ChecksumAlgorithm(checksums.Algorithm)}
+}
+
+func oidcConfigFromProtobuf(oidc *fmev1.OIDCConfig) *OIDCConfig {
+	if oidc == nil {
+		return nil
+	}
+	return &OIDCConfig{
+		IssuerURL:              oidc.IssuerUrl,
+		ClientID:               oidc.ClientId,
+		RoleARN:                oidc.RoleArn,
+		Scopes:                 oidc.Scopes,
+		PersistSession:         oidc.PersistSession,
+		CustomCABundle:         oidc.CustomCaBundle,
+		SessionDurationSeconds: oidc.SessionDurationSeconds,
+	}
+}
+
+// staticCredentialsFromProtobuf keeps credentials only for the static-keys auth method, so that switching a
+// profile to another method removes the stored secret instead of leaving it behind in the file.
+func staticCredentialsFromProtobuf(authMethod fmev1.AuthMethod, creds *fmev1.StaticCredentials) *StaticCredentials {
+	if creds == nil || authMethod != fmev1.AuthMethod_AUTH_METHOD_STATIC_KEYS {
+		return nil
+	}
+	return &StaticCredentials{
+		AccessKeyID:     creds.AccessKeyId,
+		SecretAccessKey: creds.SecretAccessKey,
+		SessionToken:    creds.SessionToken,
+	}
+}
+
+func tlsFromProtobuf(tlsSettings *fmev1.EndpointTlsSettings) EndpointTLSSettings {
+	if tlsSettings == nil {
+		return EndpointTLSSettings{}
+	}
+	return EndpointTLSSettings{CABundle: tlsSettings.CaBundle, SkipVerify: tlsSettings.SkipVerify}
 }
 
 func TransferProfilesToProtobuf(transferProfiles map[string]TransferProfile) map[string]*fmev1.TransferProfile {
 	out := make(map[string]*fmev1.TransferProfile)
 
 	for name, transferProfile := range transferProfiles {
-		threads, err := safeconv.IntToInt32(transferProfile.Threads)
-		if err != nil {
-			logger.Error("Invalid Threads value %d for profile '%s': %v, using default", transferProfile.Threads, name, err)
-			threads = 1 // Default thread count
-		}
-
-		pbv := &fmev1.TransferProfile{
-			Name:                 transferProfile.Name,
-			Bucket:               transferProfile.Bucket,
-			Region:               transferProfile.Region,
-			Profile:              transferProfile.Profile,
-			Endpoint:             transferProfile.Endpoint,
-			Accelerated:          transferProfile.Accelerated,
-			FileOrder:            transferProfile.FileOrder,
-			EnableMetadataFilter: transferProfile.EnableMetadataFilter,
-			StorageClass:         transferProfile.StorageClass,
-			Paths: &fmev1.PathsSettings{
-				Local:  transferProfile.Paths.Local,
-				Remote: transferProfile.Paths.Remote,
-			},
-			AutoTuning: transferProfile.AutoTuning,
-			Checksums: &fmev1.ChecksumSettings{
-				Enabled:   transferProfile.Checksums.Enabled,
-				Algorithm: string(transferProfile.Checksums.Algorithm),
-			},
-			ChunkSize:  transferProfile.ChunkSize,
-			Filter:     transferProfile.Filter,
-			Threads:    threads,
-			MaxAge:     transferProfile.MaxAge,
-			AuthMethod: fmev1.AuthMethod(transferProfile.AuthMethod),
-		}
-
-		if transferProfile.OIDCConfig != nil {
-			pbv.OidcConfig = &fmev1.OIDCConfig{
-				IssuerUrl:              transferProfile.OIDCConfig.IssuerURL,
-				ClientId:               transferProfile.OIDCConfig.ClientID,
-				RoleArn:                transferProfile.OIDCConfig.RoleARN,
-				Scopes:                 transferProfile.OIDCConfig.Scopes,
-				PersistSession:         transferProfile.OIDCConfig.PersistSession,
-				CustomCaBundle:         transferProfile.OIDCConfig.CustomCABundle,
-				SessionDurationSeconds: transferProfile.OIDCConfig.SessionDurationSeconds,
-			}
-		}
-
-		out[name] = pbv
+		out[name] = TransferProfileToProtobuf(transferProfile)
 	}
 
 	return out
+}
+
+// TransferProfileToProtobuf converts a single profile to its wire representation.
+func TransferProfileToProtobuf(transferProfile TransferProfile) *fmev1.TransferProfile {
+	threads, err := safeconv.IntToInt32(transferProfile.Threads)
+	if err != nil {
+		logger.Error("Invalid Threads value %d for profile '%s': %v, using default", transferProfile.Threads, transferProfile.Name, err)
+		threads = 1 // Default thread count
+	}
+
+	return &fmev1.TransferProfile{
+		Name:                 transferProfile.Name,
+		Bucket:               transferProfile.Bucket,
+		Region:               transferProfile.Region,
+		Profile:              transferProfile.Profile,
+		Endpoint:             transferProfile.Endpoint,
+		Accelerated:          transferProfile.Accelerated,
+		FileOrder:            transferProfile.FileOrder,
+		EnableMetadataFilter: transferProfile.EnableMetadataFilter,
+		StorageClass:         transferProfile.StorageClass,
+		Paths: &fmev1.PathsSettings{
+			Local:  transferProfile.Paths.Local,
+			Remote: transferProfile.Paths.Remote,
+		},
+		AutoTuning: transferProfile.AutoTuning,
+		Checksums: &fmev1.ChecksumSettings{
+			Enabled:   transferProfile.Checksums.Enabled,
+			Algorithm: string(transferProfile.Checksums.Algorithm),
+		},
+		ChunkSize:         transferProfile.ChunkSize,
+		Filter:            transferProfile.Filter,
+		Threads:           threads,
+		MaxAge:            transferProfile.MaxAge,
+		AuthMethod:        fmev1.AuthMethod(transferProfile.AuthMethod),
+		OidcConfig:        oidcConfigToProtobuf(transferProfile.OIDCConfig),
+		Provider:          transferProfile.Provider.ToProtobuf(),
+		PathStyle:         transferProfile.PathStyle,
+		StaticCredentials: staticCredentialsToProtobuf(transferProfile.StaticCredentials),
+		Tls: &fmev1.EndpointTlsSettings{
+			CaBundle:   transferProfile.TLS.CABundle,
+			SkipVerify: transferProfile.TLS.SkipVerify,
+		},
+	}
+}
+
+func oidcConfigToProtobuf(oidc *OIDCConfig) *fmev1.OIDCConfig {
+	if oidc == nil {
+		return nil
+	}
+	return &fmev1.OIDCConfig{
+		IssuerUrl:              oidc.IssuerURL,
+		ClientId:               oidc.ClientID,
+		RoleArn:                oidc.RoleARN,
+		Scopes:                 oidc.Scopes,
+		PersistSession:         oidc.PersistSession,
+		CustomCaBundle:         oidc.CustomCABundle,
+		SessionDurationSeconds: oidc.SessionDurationSeconds,
+	}
+}
+
+func staticCredentialsToProtobuf(creds *StaticCredentials) *fmev1.StaticCredentials {
+	if creds == nil {
+		return nil
+	}
+	return &fmev1.StaticCredentials{
+		AccessKeyId:     creds.AccessKeyID,
+		SecretAccessKey: creds.SecretAccessKey,
+		SessionToken:    creds.SessionToken,
+	}
 }
 
 func HotFoldersFromProtobuf(hotFoldersList []*fmev1.UploadHotFolderSettings) (hotFolders []UploadHotFolderSettings) {

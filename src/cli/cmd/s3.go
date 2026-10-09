@@ -92,6 +92,8 @@ func setupFlags() {
 func setSharedFlags(command *cobra.Command) {
 	pFlags := command.PersistentFlags()
 	pFlags.StringVar(&profileName, "profile", "", strS3ProfileUsage)
+	// The flag is not read; credentials come from the Remote Configuration. Kept so existing scripts still run.
+	_ = pFlags.MarkDeprecated("profile", strS3ProfileDeprecated)
 	pFlags.IntVar(&threads, "threads", constants.DefaultThreads, strS3ThreadUsage)
 	pFlags.Int64Var(&chunkSize, "chunk-size", int64(constants.DefaultChunkSize), strS3ChunkSizeUsage)
 	pFlags.StringVar(&maxAge, "max-age", "0", strS3MaxAgeUsage)

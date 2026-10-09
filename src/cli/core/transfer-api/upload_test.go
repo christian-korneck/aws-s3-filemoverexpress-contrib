@@ -1,6 +1,7 @@
 package transfer_api
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -8,10 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/awslabs/filemoverexpress/constants"
 	"github.com/awslabs/filemoverexpress/core/transfer-api/mock"
+	"github.com/awslabs/filemoverexpress/types/configtypes"
 )
 
 func TestS3Manager_Upload(t *testing.T) {
@@ -127,6 +131,110 @@ func Test_convertToAWSStorageClass(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Errorf("convertToAWSStorageClass() got = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// multipartCapturingClient records the inputs of a multipart upload. The embedded interface is nil, so any
+// call the uploader is not expected to make panics.
+type multipartCapturingClient struct {
+	FileMoverS3ClientInterface
+
+	lock         sync.Mutex
+	create       *s3.CreateMultipartUploadInput
+	parts        []*s3.UploadPartInput
+	complete     *s3.CompleteMultipartUploadInput
+	putObjectsIn []*s3.PutObjectInput
+}
+
+func (c *multipartCapturingClient) PutObject(_ context.Context, params *s3.PutObjectInput,
+	_ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	c.putObjectsIn = append(c.putObjectsIn, params)
+	return &s3.PutObjectOutput{}, nil
+}
+
+func (c *multipartCapturingClient) CreateMultipartUpload(_ context.Context, params *s3.CreateMultipartUploadInput,
+	_ ...func(*s3.Options)) (*s3.CreateMultipartUploadOutput, error) {
+	c.create = params
+	return &s3.CreateMultipartUploadOutput{UploadId: aws.String("upload-1")}, nil
+}
+
+func (c *multipartCapturingClient) UploadPart(_ context.Context, params *s3.UploadPartInput,
+	_ ...func(*s3.Options)) (*s3.UploadPartOutput, error) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	c.parts = append(c.parts, params)
+	return &s3.UploadPartOutput{ETag: aws.String("etag")}, nil
+}
+
+func (c *multipartCapturingClient) CompleteMultipartUpload(_ context.Context, params *s3.CompleteMultipartUploadInput,
+	_ ...func(*s3.Options)) (*s3.CompleteMultipartUploadOutput, error) {
+	c.complete = params
+	return &s3.CompleteMultipartUploadOutput{}, nil
+}
+
+func (c *multipartCapturingClient) AbortMultipartUpload(_ context.Context, _ *s3.AbortMultipartUploadInput,
+	_ ...func(*s3.Options)) (*s3.AbortMultipartUploadOutput, error) {
+	return &s3.AbortMultipartUploadOutput{}, nil
+}
+
+func uploadTwoParts(t *testing.T, provider configtypes.S3Provider, storageClass string) *multipartCapturingClient {
+	t.Helper()
+	client := &multipartCapturingClient{}
+	s3m := &S3Manager{Bucket: "bucket", Client: client, Lock: &sync.RWMutex{}, Provider: provider}
+	_, err := s3m.Upload(UploadConfig{
+		ChunkSize:    5 * constants.MiB,
+		Context:      context.Background(),
+		Destination:  "media/clip.mov",
+		Reader:       bytes.NewReader(make([]byte, 6*constants.MiB)),
+		StorageClass: storageClass,
+		Threads:      1,
+	})
+	if err != nil {
+		t.Fatalf("Upload() error = %v", err)
+	}
+	if client.create == nil || len(client.parts) != 2 {
+		t.Fatalf("expected a two-part multipart upload, got create=%v parts=%d", client.create != nil, len(client.parts))
+	}
+	return client
+}
+
+func TestUpload_MultipartChecksumsPerProvider(t *testing.T) {
+	minio := uploadTwoParts(t, configtypes.S3ProviderMinIO, "standard")
+	if minio.create.ChecksumAlgorithm != "" {
+		t.Errorf("MinIO CreateMultipartUpload ChecksumAlgorithm = %q, want none", minio.create.ChecksumAlgorithm)
+	}
+	for i, part := range minio.parts {
+		if part.ChecksumAlgorithm != "" {
+			t.Errorf("MinIO part %d ChecksumAlgorithm = %q, want none", i, part.ChecksumAlgorithm)
+		}
+	}
+
+	aws := uploadTwoParts(t, configtypes.S3ProviderAWS, "standard")
+	if aws.create.ChecksumAlgorithm != types.ChecksumAlgorithmCrc32 {
+		t.Errorf("AWS CreateMultipartUpload ChecksumAlgorithm = %q, want SDK default CRC32", aws.create.ChecksumAlgorithm)
+	}
+}
+
+func TestUpload_StorageClassPerProvider(t *testing.T) {
+	tests := []struct {
+		provider     configtypes.S3Provider
+		storageClass string
+		want         types.StorageClass
+	}{
+		{provider: configtypes.S3ProviderAWS, storageClass: "glacier_ir", want: types.StorageClassGlacierIr},
+		{provider: configtypes.S3ProviderBackblaze, storageClass: "glacier_ir", want: ""},
+		{provider: configtypes.S3ProviderWasabi, storageClass: "standard", want: ""},
+		{provider: configtypes.S3ProviderMinIO, storageClass: "reduced redundancy", want: types.StorageClass("REDUCED_REDUNDANCY")},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.provider), func(t *testing.T) {
+			client := uploadTwoParts(t, tt.provider, tt.storageClass)
+			if client.create.StorageClass != tt.want {
+				t.Errorf("StorageClass = %q, want %q", client.create.StorageClass, tt.want)
 			}
 		})
 	}

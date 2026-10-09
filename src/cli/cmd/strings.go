@@ -35,9 +35,10 @@ const (
 	strS3DownloadHelp                        = "Download files"
 	strValidateTransferProfile               = "validate-credentials"
 	strS3ValidateCredentialsUse              = "validate-credentials <transfer-profile>" //#nosec
-	strS3ValidateCredentialsShortHelp        = "AWS credential validation"               //#nosec
-	strS3ValidateCredentialsLongHelp         = "Validates the provided AWS credentials for a given transfer profile configuration"
-	strS3ProfileUsage                        = "AWS profile"
+	strS3ValidateCredentialsShortHelp        = "Credential validation"                   //#nosec
+	strS3ValidateCredentialsLongHelp         = "Validates the credentials and endpoint for a given transfer profile configuration"
+	strS3ProfileUsage                        = "Unused; credentials come from the Remote Configuration"
+	strS3ProfileDeprecated                   = "it has no effect; set the credentials in the Remote Configuration"
 	strS3ThreadUsage                         = "Number of threads per upload"
 	strS3ChunkSizeUsage                      = "Chunk size in MB"
 	strS3MaxAgeUsage                         = "Max age for files to process"

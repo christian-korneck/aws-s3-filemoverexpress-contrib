@@ -1,7 +1,7 @@
 import { ConnectedPosition, Overlay, OverlayRef } from '@angular/cdk/overlay';
-import { ComponentPortal } from '@angular/cdk/portal';
+import { ComponentPortal, ComponentType } from '@angular/cdk/portal';
 import { Injectable, Injector, inject } from '@angular/core';
-import { HINT_POPOVER_MODE, HintsPanelComponent } from '@app/components/layout/hints-panel/hints-panel.component';
+import { HINT_POPOVER_MODE } from '@app/components/layout/hints-panel/hints-panel.token';
 
 /**
  * Opens the shared HintsPanelComponent as a compact popover anchored to the clicked
@@ -17,6 +17,7 @@ export class HintPopoverService {
     private overlay = inject(Overlay);
     private injector = inject(Injector);
     private activeOverlay: OverlayRef | null = null;
+    private openRequest = 0;
 
     open(origin: HTMLElement, mode: string): void {
         // Dispose any popover already open (e.g. a fast double-click on the "Info" link)
@@ -24,6 +25,19 @@ export class HintPopoverService {
         this.activeOverlay?.dispose();
         this.activeOverlay = null;
 
+        // The panel carries every help text in the app, so it is loaded on first use to keep it out of
+        // the initial bundle. Only the most recent request opens a popover.
+        const request = ++this.openRequest;
+        import('@app/components/layout/hints-panel/hints-panel.component')
+            .then(({HintsPanelComponent}) => {
+                if (request === this.openRequest) {
+                    this.attach(origin, mode, HintsPanelComponent);
+                }
+            })
+            .catch((error: unknown) => console.error('Unable to load hints panel', error));
+    }
+
+    private attach(origin: HTMLElement, mode: string, component: ComponentType<unknown>): void {
         // Prefer below the link (right edge aligned); fall back to above if there isn't room.
         const below: ConnectedPosition = { originX: 'end', originY: 'bottom', overlayX: 'end', overlayY: 'top', offsetY: 8 };
         const above: ConnectedPosition = { originX: 'end', originY: 'top', overlayX: 'end', overlayY: 'bottom', offsetY: -8 };
@@ -46,7 +60,7 @@ export class HintPopoverService {
             parent: this.injector,
             providers: [{ provide: HINT_POPOVER_MODE, useValue: mode }],
         });
-        overlayRef.attach(new ComponentPortal(HintsPanelComponent, null, portalInjector));
+        overlayRef.attach(new ComponentPortal(component, null, portalInjector));
 
         const dispose = () => {
             overlayRef.dispose();

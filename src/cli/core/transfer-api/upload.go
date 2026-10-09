@@ -37,13 +37,18 @@ func (s3m *S3Manager) Upload(input UploadConfig) (*manager.UploadOutput, error) 
 		uploader = manager.NewUploader(s3m.Client, func(d *manager.Uploader) {
 			d.PartSize = input.ChunkSize
 			d.Concurrency = input.Threads
+			// The uploader adds CRC32 checksums to multipart uploads on its own, independent of the client
+			// setting, so it needs the same relaxation as the client for S3-compatible providers.
+			if !s3m.Provider.IsAWS() {
+				d.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+			}
 		})
 		s3m.Lock.Lock()
 		s3m.Uploader = uploader
 		s3m.Lock.Unlock()
 	}
 
-	awsStorageClass, err := convertToAWSStorageClass(input.StorageClass)
+	awsStorageClass, err := s3m.storageClassFor(input.StorageClass)
 	if err != nil {
 		return nil, err
 	}
@@ -71,6 +76,21 @@ func (s3m *S3Manager) Upload(input UploadConfig) (*manager.UploadOutput, error) 
 	}
 
 	return uploadOutput, err
+}
+
+// storageClassFor returns the storage class header value to send for this manager's provider. Amazon S3
+// uses the fixed AWS class list. Other providers either reject the header or only accept their default
+// class, so it is omitted (empty) unless the user configured a non-standard value on a provider that
+// supports storage classes; that value is passed through verbatim in the S3 header form.
+func (s3m *S3Manager) storageClassFor(storageClass string) (types.StorageClass, error) {
+	if s3m.Provider.IsAWS() {
+		return convertToAWSStorageClass(storageClass)
+	}
+	normalized := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(storageClass), " ", "_"))
+	if !s3m.Provider.Spec().SupportsStorageClass || normalized == "" || normalized == string(types.StorageClassStandard) {
+		return "", nil
+	}
+	return types.StorageClass(normalized), nil
 }
 
 func convertToAWSStorageClass(storageClass string) (types.StorageClass, error) {

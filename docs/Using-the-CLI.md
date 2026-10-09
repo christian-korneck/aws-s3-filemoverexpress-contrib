@@ -83,7 +83,7 @@ filemoverexpress download my-config ./ important-file.txt
 | Flag | Description | Example |
 |------|-------------|---------|
 | `--help` | List available flags and commands | `filemoverexpress --help` |
-| `--profile` | AWS named profile | `--profile my_profile` |
+| `--profile` | Deprecated and ignored; credentials come from the Remote Configuration | — |
 | `--prefix` | S3 prefix path | `--prefix my/s3/path` |
 
 ### Transfer Control Flags
@@ -246,7 +246,8 @@ hotFolders:
 
 ### Validate Credentials
 
-Test your AWS configuration:
+Test a Remote Configuration end to end (credentials, endpoint, region and TLS settings) by listing its bucket once.
+Works for Amazon S3 and for [S3-compatible providers](S3-Compatible-Providers.md):
 
 ```bash
 filemoverexpress validate-credentials [remote-configuration]
